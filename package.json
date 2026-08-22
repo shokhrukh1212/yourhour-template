@@ -8,6 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "migrate": "tsx --env-file=.env.local scripts/migrate.ts",
+    "backup": "tsx --env-file=.env.local scripts/backup-json.ts",
+    "predeploy:compat": "tsx --env-file=.env.local scripts/pre-deploy-compat.ts",
     "seed:demo": "tsx --env-file=.env.local scripts/seed-demo.ts",
     "test": "tsx --test lib/__tests__/*.test.ts",
     "test:reconcile": "tsx --env-file=.env.local scripts/test-reconcile.ts",

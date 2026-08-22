@@ -167,10 +167,19 @@ refused and a click IP is deduped forever.
 
 ## Deploying
 
+Order matters. The new code cannot write to the old schema (the new checkout inserts no
+`locked_price`), and the old code cannot read the new one (no `board` table) — so a naive
+deploy breaks buying in one direction or the homepage in the other.
+`scripts/pre-deploy-compat.ts` removes that window: three additive statements the *old*
+code is entirely indifferent to, after which either build works against the database.
+
 ```bash
-vercel env add ...   # everything in .env.example, for production
-vercel --prod
-npm run migrate      # against the production DATABASE_URL
+npm run backup             # read-only JSON snapshot of every table; do this first
+npm run predeploy:compat   # old schema starts accepting the new code
+vercel --prod              # deploy; buying keeps working throughout
+npm run migrate            # now drop the old columns
+npm run cleanup:wall            # dry run
+npm run cleanup:wall -- --apply
 ```
 
 `lib/schema.sql` is re-run in full on every migrate, so every statement in it is
@@ -181,12 +190,8 @@ database gets the same shape.
 Then add the Lemon Squeezy webhook pointing at `/api/webhooks/lemonsqueezy` with
 `order_created` enabled, and register the cron pinger.
 
-### One-off cleanup
+`npm run migrate` drops columns, and a dropped column is not recoverable — `npm run backup`
+first is not optional.
 
-```bash
-npm run cleanup:wall              # dry run
-npm run cleanup:wall -- --apply
-```
-
-Deletes the two legacy Wall entries titled "X (formerly Twitter)". Their slots are kept,
-clicks and all, so no public counter moves.
+`cleanup:wall` deletes the two legacy Wall entries titled "X (formerly Twitter)". Their
+slots are kept, clicks and all, so no public counter moves.
