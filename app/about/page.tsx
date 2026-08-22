@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import { MIN_ENTRY_CENTS, formatPrice } from "@/lib/pricing";
 
 export const metadata: Metadata = { title: "About" };
 
@@ -17,49 +18,43 @@ export default function AboutPage() {
             the same screen and the visitor&apos;s eye keeps moving.
           </p>
           <p className="text-foreground">
-            This sells exclusivity and a deadline. For sixty minutes there is nothing
-            else on the page. When the hour ends it&apos;s gone, and somebody else has it.
+            The Wall is a leaderboard nobody can push you off. You buy a rank, it&apos;s
+            ranked by what you paid, and it is permanent — no expiry, no renewal, no
+            algorithm that quietly reshuffles it next month.
           </p>
           <p>
-            The price finds its own level. Every sale pushes the base price up 20%.
-            Silence pulls it back down, but slowly and never all the way: three quiet
-            hours in a row cost nothing, the fourth and each one after take 5%, and it
-            never falls below half of the highest it has ever been. Nobody sets it.
+            The price is not something we set. Rank #1 costs a dollar more than the most
+            anyone has paid, and that is the entire pricing system. It moves only when a
+            real person pays, and it only moves up. There is no countdown, no discount for
+            waiting, and nothing that gets cheaper if you close the tab — which means the
+            number you see is the honest one.
           </p>
           <p>
-            What a particular hour costs is that base price scaled by the time of day.
-            The middle of the US working day is worth twice a midnight hour, so it costs
-            twice as much, and the dead hours cost less than half. And an hour still
-            unsold half an hour before it starts drops to a flat $1 — it is about to be
-            wasted, so somebody may as well have it.
+            You can pay any amount from {formatPrice(MIN_ENTRY_CENTS)}. Whatever you pay
+            is your rank. Pay more than the current top and you take #1; pay less and you
+            take the rank that amount earns, above everyone who paid less than you and
+            below everyone who paid more.
           </p>
           <p>
-            The number you are quoted is a minimum, not a price. You can pay more, and
-            the only thing more buys is rank — a permanent row on The Wall, ordered by
-            what was paid, that nothing later can push you down. If you just want the row
-            and not the hour, you can buy that on its own from $5.
+            Every purchase also gets an hour on the homepage. For sixty minutes there is
+            nothing else on the page: your name, your sentence, your link. That hour is
+            worth what you make of it — the page is yours, but the clicks come from the
+            audience you point at it, and the buyers who do well are the ones who tell
+            people their hour is running.
           </p>
           <p>
-            You can take three hours back to back, or hold the same hour of the day for
-            three or seven days running. And you can buy an hour for somebody else: their
-            product owns the screen, the post credits both of you.
+            When an hour is unsold the homepage says it is empty. We never fill it with
+            somebody else&apos;s product for free, because a visitor who sees a product
+            that didn&apos;t pay learns the wrong thing about what is being sold here.
           </p>
           <p>
-            An hour here is worth what you make of it. The page is yours, but the clicks
-            come from the audience you point at it. The buyers who do well are the ones
-            who tell people their hour is running.
-          </p>
-          <p>
-            Every purchase keeps its page, its click count and its place on The Wall
+            Every purchase keeps its page, its click count and its place on the Wall
             permanently, so what you bought doesn&apos;t disappear when the countdown
             does. You get a named page at
             <code className="mx-1 text-foreground">yourhour.lol/u/your-product</code>
-            that renders as a card wherever you post it.
-          </p>
-          <p>
-            When the hour closes we email you what it did — your click count, what you
-            paid, and what an hour costs now. Early buyers tend to like that second
-            number more as time goes on.
+            that renders as a card wherever you post it — showing what you paid against
+            what #1 costs now. Early buyers tend to like that second number more as time
+            goes on.
           </p>
         </div>
         <p className="mt-10 border-t border-border pt-6 text-sm">

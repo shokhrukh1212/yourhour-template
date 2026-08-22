@@ -15,11 +15,6 @@ export async function GET(
     return NextResponse.redirect(new URL("/", config.siteUrl));
   }
 
-  // An encore is free airtime for a past buyer during an hour nobody bought. Those
-  // clicks are counted separately so an archive row never stops meaning "clicks
-  // earned during that buyer's own hour".
-  const isEncore = new URL(request.url).searchParams.get("encore") === "1";
-
   const rows = await query<{ url: string | null }>(
     `SELECT url FROM slots WHERE id = $1`,
     [slotId],
@@ -39,12 +34,7 @@ export async function GET(
         [slotId, ipHash],
       );
       if (inserted.rowCount) {
-        await client.query(
-          isEncore
-            ? `UPDATE slots SET encore_clicks = encore_clicks + 1 WHERE id = $1`
-            : `UPDATE slots SET clicks = clicks + 1 WHERE id = $1`,
-          [slotId],
-        );
+        await client.query(`UPDATE slots SET clicks = clicks + 1 WHERE id = $1`, [slotId]);
       }
     });
   } catch (err) {
@@ -52,7 +42,7 @@ export async function GET(
     console.error("click tracking failed", err);
   }
 
-  void trackServerEvent("slot_clicked", { slotId, encore: isEncore });
+  void trackServerEvent("slot_clicked", { slotId });
 
   return NextResponse.redirect(url, { status: 302 });
 }

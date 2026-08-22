@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { getBoard } from "@/lib/slots";
-import { getWallEntryBySlug } from "@/lib/wall";
+import { numberOnePrice } from "@/lib/pricing";
+import { getWallEntryBySlug, getWallTopAmount } from "@/lib/wall";
 
 export const dynamic = "force-dynamic";
 
@@ -10,11 +10,11 @@ export async function GET(
   { params }: { params: Promise<{ slug: string }> },
 ) {
   const { slug } = await params;
-  const [entry, board] = await Promise.all([getWallEntryBySlug(slug), getBoard()]);
+  const [entry, topAmount] = await Promise.all([getWallEntryBySlug(slug), getWallTopAmount()]);
   if (!entry) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   return NextResponse.json(
-    { clicks: entry.total_clicks, boardPrice: board.price },
+    { clicks: entry.total_clicks, numberOne: numberOnePrice(topAmount) },
     { headers: { "cache-control": "no-store" } },
   );
 }

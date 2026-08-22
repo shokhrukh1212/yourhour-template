@@ -2,12 +2,11 @@ import Link from "next/link";
 import { formatPrice } from "@/lib/pricing";
 import type { WallEntry } from "@/lib/wall";
 import { WALL_PAGE_SIZE } from "@/lib/wall-rank";
-import { WallJoinForm } from "./WallJoinForm";
 
 /**
- * The permanent leaderboard, ranked by money and never reset. It replaces the old
- * reverse-chronological archive, which rewarded nothing: here paying more is the only
- * thing that moves you up, and nothing that happens later can move you down.
+ * The permanent leaderboard, ranked by money and never reset. This is the product: the
+ * hour on the homepage is what comes with it. Paying more is the only thing that moves
+ * you up, and nothing that happens later can move you down.
  *
  * The product name is a direct, dofollow anchor. Everything else on the page routes
  * clicks through /w/:id so the counts stay honest -- but the permanent backlink is part
@@ -18,13 +17,11 @@ export function Wall({
   page,
   totalPages,
   total,
-  wallAmounts,
 }: {
   entries: WallEntry[];
   page: number;
   totalPages: number;
   total: number;
-  wallAmounts: number[];
 }) {
   // Only the actual top of the Wall gets the large treatment; page 2 is all rows.
   const podium = page === 1 ? entries.slice(0, 3) : [];
@@ -34,20 +31,20 @@ export function Wall({
   return (
     <section id="wall" className="mx-auto w-full max-w-2xl scroll-mt-8 px-6 pb-24">
       <div className="mb-4 flex items-baseline justify-between gap-4">
-        <h3 className="text-sm font-medium uppercase tracking-[0.2em] text-faint">
-          The Wall
-        </h3>
+        <h2 className="text-sm font-medium uppercase tracking-[0.2em] text-faint">
+          The Wall <span className="text-accent">— permanent</span>
+        </h2>
         {total > 0 ? (
           <p className="text-xs text-faint">
-            {total.toLocaleString()} {total === 1 ? "entry" : "entries"} · permanent
+            {total.toLocaleString()} {total === 1 ? "product" : "products"}
           </p>
         ) : null}
       </div>
 
       {entries.length === 0 ? (
         <p className="rounded-2xl border border-border bg-surface p-6 text-center text-muted">
-          Nobody is on The Wall yet. The first entry stays rank #1 until someone
-          outbids it.
+          Nobody is on The Wall yet. The first product here stays rank #1 until someone
+          pays more.
         </p>
       ) : null}
 
@@ -97,7 +94,9 @@ export function Wall({
         </nav>
       ) : null}
 
-      <WallJoinForm wallAmounts={wallAmounts} />
+      <p className="mt-6 text-center text-xs text-faint">
+        Nobody is ever removed from the Wall.
+      </p>
     </section>
   );
 }
@@ -122,7 +121,7 @@ function PodiumCard({ entry, rank }: { entry: WallEntry; rank: number }) {
         </span>
       </div>
 
-      <h4 className="mt-3 text-xl font-semibold tracking-tight">
+      <h3 className="mt-3 text-xl font-semibold tracking-tight">
         <a
           href={entry.url ?? "#"}
           target="_blank"
@@ -131,11 +130,7 @@ function PodiumCard({ entry, rank }: { entry: WallEntry; rank: number }) {
         >
           {entry.display_name}
         </a>
-      </h4>
-
-      {entry.gifter_handle ? (
-        <p className="mt-1 text-xs text-faint">gifted by {entry.gifter_handle}</p>
-      ) : null}
+      </h3>
 
       {entry.pitch ? (
         <p className="mt-1.5 text-sm leading-relaxed text-muted">{entry.pitch}</p>
@@ -178,9 +173,6 @@ function WallRow({ entry, rank }: { entry: WallEntry; rank: number }) {
         >
           {entry.display_name}
         </a>
-        {entry.gifter_handle ? (
-          <span className="ml-2 text-xs text-faint">gifted by {entry.gifter_handle}</span>
-        ) : null}
       </span>
       <span className="shrink-0 font-medium tabular">
         {formatPrice(entry.amount_paid)}

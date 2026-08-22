@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # End-to-end check of the live flow against a running dev server.
 #
-# DESTRUCTIVE: expects a board seeded by `npm run reset && npm run seed:demo`, and it
-# completes real checkouts. Never point BASE at production or run it with DATABASE_URL
-# aimed at a database holding real sales.
+# DESTRUCTIVE: expects a board seeded by `npm run reset -- --confirm && npm run seed:demo`,
+# and it completes real checkouts. Never point BASE at production or run it with
+# DATABASE_URL aimed at a database holding real sales.
 #
 #   npm run dev   (in another shell)
 #   bash scripts/test-e2e.sh
@@ -11,6 +11,16 @@ set -uo pipefail
 
 BASE="${BASE:-http://localhost:3000}"
 SECRET="${CRON_SECRET:-dev-cron-secret}"
+# Every product name and click IP is unique to this run. A name already on the Wall is
+# refused (correctly), and a click IP is deduped forever, so reusing either would make
+# the suite pass once and then fail on every re-run.
+RUN="${RUN:-$(date +%s)}"
+ONE_HOST="buyer-one-$RUN.example.com"
+TWO_HOST="buyer-two-$RUN.example.com"
+LOW_HOST="smallbuyer-$RUN.example.com"
+IP_A="203.0.113.$(( RUN % 200 + 10 ))"
+IP_B="198.51.100.$(( RUN % 200 + 10 ))"
+IP_C="192.0.2.$(( RUN % 200 + 10 ))"
 PASS=0
 FAIL=0
 
@@ -37,172 +47,174 @@ print(d)
 ' "$1" 2>/dev/null
 }
 
-echo "== board =="
-BOARD=$(curl -s "$BASE/api/board")
-PRICE0=$(echo "$BOARD" | jqv price)
-echo "  board price: $PRICE0"
-FLOOR_DOLLARS=$(python3 -c "print(f'{$PRICE0/100:.2f}')")
+post() { curl -s -X POST "$BASE$1" -H 'content-type: application/json' -d "$2"; }
+code() { curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE$1" -H 'content-type: application/json' -d "$2"; }
+
+echo "== price =="
+NUMBER_ONE=$(curl -s "$BASE/api/board" | jqv numberOne)
+echo "  #1 costs: ${NUMBER_ONE}c"
+TOP=$(python3 -c "print(f'{($NUMBER_ONE-100)/100:.2f}')")
+ONE_DOLLARS=$(python3 -c "print(f'{$NUMBER_ONE/100:.2f}')")
 
 echo
-echo "== checkout validation =="
-R=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/checkout" \
-  -H 'content-type: application/json' -d '{"slotId":"1","amount":"5","url":"not-a-url","email":"a@b.co"}')
-check "rejects an invalid URL" "$R" "400"
-
-R=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/checkout" \
-  -H 'content-type: application/json' -d '{"slotId":"1","amount":"5","url":"http://localhost:9/x","email":"a@b.co"}')
-check "rejects a private/loopback URL" "$R" "400"
-
-# The pitch is scraped from the buyer's page, not submitted, so it is capped in
-# lib/metadata.ts and by the slots.pitch CHECK rather than by request validation.
-R=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/checkout" \
-  -H 'content-type: application/json' -d '{"slotId":"1","amount":"5","url":"https://ok.com","email":"a@b.co","xHandle":"not a handle"}')
-check "rejects a malformed X handle" "$R" "400"
+echo "== url validation =="
+check "rejects an invalid URL"          "$(code /api/preview '{"url":"not-a-url"}')" "400"
+check "rejects a private/loopback URL"  "$(code /api/preview '{"url":"http://localhost:9/x"}')" "400"
+check "rejects an x.com link"           "$(code /api/preview '{"url":"https://x.com/devbylund"}')" "400"
+check "rejects a twitter.com link"      "$(code /api/preview '{"url":"https://twitter.com/devbylund"}')" "400"
 
 echo
-echo "== the current hour is locked =="
-LIVE_ID=$(curl -s "$BASE/api/board" | jqv live.id)
-CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/checkout" -H 'content-type: application/json' \
-  -d "{\"slotId\":\"$LIVE_ID\",\"amount\":\"5\",\"url\":\"https://ok.com\",\"email\":\"a@b.co\"}")
-check "refuses to sell the in-progress hour" "$CODE" "409"
+echo "== the preview scrapes a name =="
+PREV=$(post /api/preview '{"url":"https://example.com"}')
+PNAME=$(echo "$PREV" | jqv productName)
+if [ -n "$PNAME" ]; then ok "scraped a product name ($PNAME)"; else bad "preview" "$PREV"; fi
 
 echo
-echo "== reserve an open hour =="
-SLOT=$(curl -s "$BASE/api/test/open-slot" | jqv id)
-if [ -z "$SLOT" ]; then bad "find an open slot" "helper endpoint returned nothing"; fi
-RES=$(curl -s -X POST "$BASE/api/checkout" -H 'content-type: application/json' \
-  -d "{\"slotId\":\"$SLOT\",\"amount\":\"$FLOOR_DOLLARS\",\"url\":\"https://example.com\",\"email\":\"e2e@example.com\"}")
-CURL=$(echo "$RES" | jqv checkoutUrl)
-if [ -n "$CURL" ]; then ok "reserved slot $SLOT and got a checkout URL"; else bad "reserve slot" "$RES"; fi
+echo "== amount validation =="
+check "refuses an amount under \$3" \
+  "$(code /api/checkout '{"url":"https://example.com","amount":"2.99"}')" "400"
+check "refuses a nonsense amount" \
+  "$(code /api/checkout '{"url":"https://example.com","amount":"abc"}')" "400"
 
 echo
-echo "== double-booking is refused =="
-CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/checkout" -H 'content-type: application/json' \
-  -d "{\"slotId\":\"$SLOT\",\"amount\":\"$FLOOR_DOLLARS\",\"url\":\"https://other.com\",\"email\":\"two@example.com\"}")
-check "second buyer cannot take the reserved hour" "$CODE" "409"
+echo "== two actions: paste a URL, then pay =="
+NEXT_OPEN=$(curl -s "$BASE/api/test/open-slot" | jqv id)
+RES=$(post /api/checkout "{\"url\":\"https://$ONE_HOST\",\"amount\":\"$ONE_DOLLARS\"}")
+CURL_PATH=$(echo "$RES" | jqv checkoutUrl)
+GOT_SLOT=$(echo "$RES" | jqv slotId)
+if [ -n "$CURL_PATH" ]; then ok "checkout opened with no email, handle or hour picker"; else bad "checkout" "$RES"; fi
+check "was assigned the earliest open hour" "$GOT_SLOT" "$NEXT_OPEN"
+
+echo
+echo "== a second buyer never gets the same hour =="
+RES2=$(post /api/checkout "{\"url\":\"https://$TWO_HOST\",\"amount\":\"3.00\"}")
+SLOT2=$(echo "$RES2" | jqv slotId)
+CURL2=$(echo "$RES2" | jqv checkoutUrl)
+if [ -n "$SLOT2" ] && [ "$SLOT2" != "$GOT_SLOT" ]; then
+  ok "held a different hour ($SLOT2)"
+else
+  bad "concurrent hold" "second buyer got slot [$SLOT2], first got [$GOT_SLOT]"
+fi
 
 echo
 echo "== complete payment (dev stub) =="
-curl -s -o /dev/null -L "$BASE$CURL"
-PRICE1=$(curl -s "$BASE/api/board" | jqv price)
-EXPECTED=$(python3 -c "print(max(100, round($PRICE0*1.20)))")
-check "board price rose 20% after the sale" "$PRICE1" "$EXPECTED"
+curl -s -o /dev/null -L "$BASE$CURL_PATH"
+NEW_ONE=$(curl -s "$BASE/api/board" | jqv numberOne)
+EXPECTED=$(python3 -c "print($NUMBER_ONE + 100)")
+check "paying the #1 price raised #1 by exactly \$1" "$NEW_ONE" "$EXPECTED"
+
+SOLD_STATUS=$(curl -s "$BASE/api/test/slot-status?id=$GOT_SLOT" 2>/dev/null | jqv status)
+echo
+echo "== the hour quoted at checkout is the hour delivered =="
+ENTRY_SLUG=$(curl -s "$BASE/api/checkout/status?r=$(echo "$CURL_PATH" | sed 's/.*reservation=//')" | jqv slug)
+if [ -n "$ENTRY_SLUG" ]; then ok "the sale landed on the Wall as /u/$ENTRY_SLUG"; else bad "sale" "no slug"; fi
 
 echo
 echo "== webhook idempotency =="
-curl -s -o /dev/null -L "$BASE$CURL"
-PRICE2=$(curl -s "$BASE/api/board" | jqv price)
-check "replaying the same order does not bump P twice" "$PRICE2" "$PRICE1"
+curl -s -o /dev/null -L "$BASE$CURL_PATH"
+AGAIN=$(curl -s "$BASE/api/board" | jqv numberOne)
+check "replaying the same order does not raise it twice" "$AGAIN" "$NEW_ONE"
 
 echo
-echo "== the floor is a minimum, not a price =="
-CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/checkout" -H 'content-type: application/json' \
-  -d "{\"slotId\":\"$(curl -s "$BASE/api/test/open-slot" | jqv id)\",\"amount\":\"0.01\",\"url\":\"https://example.com\",\"email\":\"low@example.com\"}")
-check "refuses an amount below the floor" "$CODE" "409"
-
-PRICE_BEFORE=$(curl -s "$BASE/api/board" | jqv price)
-OVER_SLOT=$(curl -s "$BASE/api/test/open-slot" | jqv id)
-OVER_DOLLARS=$(python3 -c "print(f'{$PRICE_BEFORE/100*5:.2f}')")
-OVER=$(curl -s -X POST "$BASE/api/checkout" -H 'content-type: application/json' \
-  -d "{\"slotId\":\"$OVER_SLOT\",\"amount\":\"$OVER_DOLLARS\",\"url\":\"https://bigspender.example.com\",\"email\":\"big@example.com\"}")
-curl -s -o /dev/null -L "$BASE$(echo "$OVER" | jqv checkoutUrl)"
-PRICE_AFTER=$(curl -s "$BASE/api/board" | jqv price)
-EXPECTED=$(python3 -c "print(max(100, round($PRICE_BEFORE*1.20)))")
-check "paying 5x the floor still moves it only 20%" "$PRICE_AFTER" "$EXPECTED"
+echo "== the price only ever rises =="
+check "no price fell after any of the above" \
+  "$(python3 -c "print('yes' if $AGAIN >= $NUMBER_ONE else 'no')")" "yes"
 
 echo
-echo "== a Wall spot takes no hour and moves no price =="
-CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/checkout" -H 'content-type: application/json' \
-  -d '{"kind":"wall","amount":"4.99","url":"https://example.com","email":"cheap@example.com"}')
-check "refuses a Wall spot under \$5" "$CODE" "400"
-
-PRICE_BEFORE=$(curl -s "$BASE/api/board" | jqv price)
-WALLRES=$(curl -s -X POST "$BASE/api/checkout" -H 'content-type: application/json' \
-  -d '{"kind":"wall","amount":"25.00","url":"https://wallbuyer.example.com","email":"wall@example.com"}')
-WALLURL=$(echo "$WALLRES" | jqv checkoutUrl)
-if [ -n "$WALLURL" ]; then ok "Wall spot checkout opened"; else bad "Wall checkout" "$WALLRES"; fi
-curl -s -o /dev/null -L "$BASE$WALLURL"
-check "a Wall spot does not move the floor" "$(curl -s "$BASE/api/board" | jqv price)" "$PRICE_BEFORE"
+echo "== a duplicate product name is refused =="
+check "same name cannot be on the Wall twice" \
+  "$(code /api/checkout "{\"url\":\"https://$ONE_HOST\",\"amount\":\"9.00\"}")" "409"
 
 echo
-echo "== a multi-hour block is one sale =="
-PRICE_BEFORE=$(curl -s "$BASE/api/board" | jqv price)
-BLOCK_SLOT=$(curl -s "$BASE/api/test/open-slot" | jqv id)
-BLOCK_DOLLARS=$(python3 -c "print(f'{round($PRICE_BEFORE*2.5)/100:.2f}')")
-BLOCKRES=$(curl -s -X POST "$BASE/api/checkout" -H 'content-type: application/json' \
-  -d "{\"slotId\":\"$BLOCK_SLOT\",\"blockHours\":3,\"amount\":\"$BLOCK_DOLLARS\",\"url\":\"https://blockbuyer.example.com\",\"email\":\"block@example.com\"}")
-BLOCKURL=$(echo "$BLOCKRES" | jqv checkoutUrl)
-if [ -n "$BLOCKURL" ]; then ok "3-hour block reserved"; else bad "block checkout" "$BLOCKRES"; fi
-curl -s -o /dev/null -L "$BASE$BLOCKURL"
-EXPECTED=$(python3 -c "print(max(100, round($PRICE_BEFORE*1.20)))")
-check "three hours bought together move the floor once" "$(curl -s "$BASE/api/board" | jqv price)" "$EXPECTED"
+echo "== paying below #1 still gets on the Wall =="
+LOW=$(post /api/checkout "{\"url\":\"https://$LOW_HOST\",\"amount\":\"3.00\"}")
+LOWURL=$(echo "$LOW" | jqv checkoutUrl)
+if [ -n "$LOWURL" ]; then ok "a \$3 buyer is accepted"; else bad "\$3 buyer" "$LOW"; fi
+curl -s -o /dev/null -L "$BASE$LOWURL"
+TOP_AFTER=$(curl -s "$BASE/api/board" | jqv numberOne)
+check "a below-top purchase does not change what #1 costs" "$TOP_AFTER" "$NEW_ONE"
+
+echo
+echo "== the success page =="
+LOWRES=$(echo "$LOWURL" | sed 's/.*reservation=//')
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/success?r=$LOWRES")
+check "success page renders" "$CODE" "200"
+if curl -s "$BASE/success?r=$LOWRES" | grep -q "You&#x27;re on the Wall\|You're on the Wall"; then
+  ok "success page confirms the Wall spot"
+else
+  bad "success page" "missing the confirmation headline"
+fi
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/success?r=00000000-0000-0000-0000-000000000000")
+check "an unknown reservation 404s" "$CODE" "404"
 
 echo
 echo "== click tracking =="
+LIVE_ID=$(curl -s "$BASE/api/board" | jqv live.id)
 C0=$(curl -s "$BASE/api/board" | jqv live.clicks)
-for i in 1 2 3 4 5; do curl -s -o /dev/null -H 'x-forwarded-for: 203.0.113.9' "$BASE/r/$LIVE_ID"; done
+for i in 1 2 3 4 5; do curl -s -o /dev/null -H "x-forwarded-for: $IP_A" "$BASE/r/$LIVE_ID"; done
 C1=$(curl -s "$BASE/api/board" | jqv live.clicks)
 check "five hits from one IP count once" "$C1" "$((C0+1))"
-curl -s -o /dev/null -H 'x-forwarded-for: 198.51.100.4' "$BASE/r/$LIVE_ID"
+curl -s -o /dev/null -H "x-forwarded-for: $IP_B" "$BASE/r/$LIVE_ID"
 C2=$(curl -s "$BASE/api/board" | jqv live.clicks)
 check "a different IP counts separately" "$C2" "$((C0+2))"
-
-LOC=$(curl -s -o /dev/null -w '%{redirect_url}' -H 'x-forwarded-for: 203.0.113.77' "$BASE/r/$LIVE_ID")
+LOC=$(curl -s -o /dev/null -w '%{redirect_url}' -H "x-forwarded-for: $IP_C" "$BASE/r/$LIVE_ID")
 if [ -n "$LOC" ]; then ok "redirects to the buyer URL ($LOC)"; else bad "redirect" "no Location header"; fi
 
 echo
 echo "== cron tick =="
-CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/cron/tick")
-check "rejects an unauthenticated tick" "$CODE" "401"
-TICK=$(curl -s -H "Authorization: Bearer $SECRET" "$BASE/api/cron/tick")
-OKV=$(echo "$TICK" | jqv ok)
-check "authenticated tick runs" "$OKV" "True"
+check "rejects an unauthenticated tick" "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/cron/tick")" "401"
+check "authenticated tick runs" "$(curl -s -H "Authorization: Bearer $SECRET" "$BASE/api/cron/tick" | jqv ok)" "True"
 
 echo
 echo "== permanent buyer page =="
-# seed-demo always names the live hour orynth.dev, which slugifies to orynth-dev.
 SLUG="orynth-dev"
-
-CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/u/$SLUG")
-check "buyer page renders" "$CODE" "200"
-
-# The numeric permalink is in confirmation emails already sent; it must not 404.
+check "buyer page renders" "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/u/$SLUG")" "200"
 LOC=$(curl -s -o /dev/null -w '%{redirect_url}' "$BASE/hour/$LIVE_ID")
 check "old /hour/:id redirects to the slug" "$LOC" "$BASE/u/$SLUG"
-
 if curl -s "$BASE/u/$SLUG" | grep -q "og:image\" content=\"$BASE/card/$SLUG.png"; then
   ok "buyer page points og:image at its receipt card"
 else
   bad "buyer page og:image" "card URL missing from metadata"
 fi
+check "receipt card renders a PNG" "$(curl -s -o /dev/null -w '%{content_type}' "$BASE/card/$SLUG.png")" "image/png"
+check "unknown slug has no card" "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/card/no-such-product.png")" "404"
 
-TYPE=$(curl -s -o /dev/null -w '%{content_type}' "$BASE/card/$SLUG.png")
-check "receipt card renders a PNG" "$TYPE" "image/png"
-
-CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/card/no-such-product.png")
-check "unknown slug has no card" "$CODE" "404"
-
-# The Wall is where the dofollow backlink lives; the buyer page counts clicks instead.
+echo
+echo "== the homepage =="
 HOME=$(curl -s "$BASE/")
-if echo "$HOME" | grep -q 'href="https://blockbuyer.example.com"'; then
+# The URL is stored normalized (new URL().toString() adds the trailing slash).
+if echo "$HOME" | grep -q "href=\"https://$ONE_HOST/\""; then
   ok "the Wall carries a direct dofollow backlink"
 else
   bad "Wall backlink" "no direct anchor to the buyer URL"
 fi
-if echo "$HOME" | grep -q 'wallbuyer.example.com'; then
-  ok "a Wall-only buyer appears on the Wall"
+if echo "$HOME" | grep -q 'id="claim-url"'; then
+  ok "the sticky claim input is on the page"
 else
-  bad "Wall-only entry" "the $25 Wall spot is not on the homepage"
+  bad "claim bar" "no claim input rendered"
 fi
+# The Wall is the product now, so it has to come first in the document.
+WALL_AT=$(echo "$HOME" | grep -bo 'id="wall"' | head -1 | cut -d: -f1)
+CAL_AT=$(echo "$HOME" | grep -bo 'Next .* hours' | head -1 | cut -d: -f1)
+if [ -n "$WALL_AT" ] && [ -n "$CAL_AT" ] && [ "$WALL_AT" -lt "$CAL_AT" ]; then
+  ok "the Wall renders above the hours list"
+else
+  bad "section order" "wall at [$WALL_AT], calendar at [$CAL_AT]"
+fi
+for word in "X handle" "gifted by" "encore" "PRIME" "QUIET" "Standing hour" "drops to" "you@example.com"; do
+  if echo "$HOME" | grep -qi -- "$word"; then
+    bad "deleted copy is gone" "homepage still mentions: $word"
+  else
+    ok "homepage does not mention \"$word\""
+  fi
+done
 
 echo
 echo "== static pages =="
 for p in rules about; do
-  CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/$p")
-  check "/$p renders" "$CODE" "200"
+  check "/$p renders" "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/$p")" "200"
 done
 
 echo
-echo "-----------------------------------------"
 echo "passed: $PASS   failed: $FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

@@ -3,20 +3,12 @@ import { SLUG_PATTERN } from "./slug";
 import { WALL_PAGE_SIZE, WALL_RANK_SAMPLE } from "./wall-rank";
 import type { Slot } from "./slots";
 
-export type WallKind = "hour" | "wall";
-
 export type WallEntry = {
   id: string;
-  kind: WallKind;
   amount_paid: number;
   display_name: string | null;
   url: string | null;
   pitch: string | null;
-  x_handle: string | null;
-  /** Who paid, when the entry was a gift. x_handle is the recipient. */
-  gifter_handle: string | null;
-  /** Days covered when this was a standing hour; 0 otherwise. */
-  standing_days: number;
   slug: string | null;
   total_clicks: number;
   created_at: Date;
@@ -25,17 +17,12 @@ export type WallEntry = {
 export type WallEntryDetail = WallEntry & { rank: number; slots: Slot[] };
 
 /**
- * Public columns only -- buyer_email is the buyer's identity and never leaves the server,
- * exactly as PUBLIC_COLUMNS does for slots.
- *
- * total_clicks splits cleanly by where the click came from: an hour entry's slots hold
- * the clicks earned live on the homepage, and e.clicks holds the ones earned afterwards
- * from the Wall and the permanent page. Encore clicks stay out of both, so a number here
- * only ever means traffic to airtime that was paid for.
+ * total_clicks splits cleanly by where the click came from: the entry's slot holds the
+ * clicks earned live on the homepage, and e.clicks holds the ones earned afterwards from
+ * the Wall and the permanent page.
  */
 const ENTRY_COLUMNS = `
-  e.id::text AS id, e.kind::text AS kind, e.amount_paid, e.display_name, e.url, e.pitch,
-  e.x_handle, e.gifter_handle, e.standing_days, e.slug, e.created_at,
+  e.id::text AS id, e.amount_paid, e.display_name, e.url, e.pitch, e.slug, e.created_at,
   (e.clicks + COALESCE(s.slot_clicks, 0))::int AS total_clicks
 `;
 
@@ -80,6 +67,30 @@ export async function getWallAmounts(cap = WALL_RANK_SAMPLE): Promise<number[]> 
   return rows.map((r) => r.amount_paid);
 }
 
+/**
+ * The highest amount anyone has paid, or null on an empty Wall. This is the one input
+ * to what a spot costs -- see numberOnePrice in lib/pricing.ts.
+ */
+export async function getWallTopAmount(): Promise<number | null> {
+  const rows = await query<{ amount_paid: number }>(
+    `SELECT amount_paid FROM wall_entries ORDER BY amount_paid DESC LIMIT 1`,
+  );
+  return rows[0]?.amount_paid ?? null;
+}
+
+/**
+ * True when something is already on the Wall under this name. Two products called the
+ * same thing make both of them worthless as a permanent listing.
+ */
+export async function wallNameIsTaken(name: string): Promise<boolean> {
+  const rows = await query<{ id: string }>(
+    `SELECT id::text AS id FROM wall_entries
+      WHERE lower(display_name) = lower($1) LIMIT 1`,
+    [name],
+  );
+  return rows.length > 0;
+}
+
 /** The permanent public page. The slug is the identity; the id never appears. */
 export async function getWallEntryBySlug(slug: string): Promise<WallEntryDetail | null> {
   if (!SLUG_PATTERN.test(slug)) return null;
@@ -101,7 +112,7 @@ export async function getWallEntryBySlug(slug: string): Promise<WallEntryDetail 
       [entry.amount_paid, entry.created_at, entry.id],
     ),
     query<Slot>(
-      `SELECT id::text AS id, starts_at, status, display_name, url, pitch, x_handle,
+      `SELECT id::text AS id, starts_at, status, display_name, url, pitch,
               claim_number, slug, price_paid, clicks, sold_at
          FROM slots WHERE wall_entry_id = $1 ORDER BY starts_at ASC`,
       [entry.id],

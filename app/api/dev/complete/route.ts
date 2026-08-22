@@ -20,15 +20,8 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "reservation required" }, { status: 400 });
   }
 
-  const rows = await query<{
-    kind: string;
-    buyer_email: string | null;
-    locked_price: number;
-    amount: number | null;
-    slot_id: string | null;
-  }>(
-    `SELECT kind, buyer_email, locked_price, amount, slot_id::text AS slot_id
-       FROM reservations WHERE id = $1`,
+  const rows = await query<{ amount: number | null; slot_id: string | null }>(
+    `SELECT amount, slot_id::text AS slot_id FROM reservations WHERE id = $1`,
     [reservationId],
   );
   const reservation = rows[0];
@@ -37,20 +30,16 @@ export async function GET(request: Request) {
   }
 
   const outcome = await applyPaidOrder({
-    kind: reservation.kind === "wall" ? "wall" : "hour",
     orderId: `dev-${reservationId}`,
     reservationId,
     slotId: reservation.slot_id,
-    // The buyer's chosen amount, not the minimum -- that is what ranks them on the Wall.
-    pricePaid: reservation.amount ?? reservation.locked_price,
-    email: reservation.buyer_email,
+    // The buyer's chosen amount -- that is what ranks them on the Wall.
+    pricePaid: reservation.amount ?? 0,
   });
 
-  if (outcome.status === "applied") {
-    return NextResponse.redirect(new URL(`/u/${outcome.slug}?welcome=1`, request.url));
-  }
-  if (outcome.status === "duplicate" && outcome.slug) {
-    return NextResponse.redirect(new URL(`/u/${outcome.slug}?welcome=1`, request.url));
+  if (outcome.status === "applied" || outcome.status === "duplicate") {
+    // Same landing as a real checkout, so the dev path exercises /success too.
+    return NextResponse.redirect(new URL(`/success?r=${reservationId}`, request.url));
   }
   return NextResponse.json(outcome, { status: 409 });
 }

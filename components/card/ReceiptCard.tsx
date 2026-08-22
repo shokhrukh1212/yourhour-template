@@ -29,18 +29,22 @@ function day(at: Date): string {
 
 /**
  * The 1200x630 receipt a buyer posts. The bottom row is the reason it gets shared: the
- * gap between what they paid and what the board costs now is the whole pitch, so both
- * numbers are set larger than anything else on the card except the name itself.
+ * gap between what they paid and what the top of the Wall costs now is the whole pitch,
+ * so both numbers are set larger than anything else on the card except the name itself.
  *
  * Satori renders a strict flexbox subset -- every element with more than one child needs
  * an explicit display:flex, and there is no grid, float or CSS variable.
  */
 export function ReceiptCard({
   entry,
-  boardPrice,
+  numberOneCents,
+  upcoming,
 }: {
   entry: WallEntryDetail;
-  boardPrice: number;
+  numberOneCents: number;
+  /** True while the buyer's hour is still ahead of them. Decided by the caller: a
+   *  component must not read the clock during render. */
+  upcoming: boolean;
 }) {
   const name = (entry.display_name ?? "yourhour").toUpperCase();
   // Long names would otherwise run off the frame; step down rather than truncate.
@@ -55,13 +59,7 @@ export function ReceiptCard({
     ? new Date(new Date(hours[hours.length - 1].starts_at).getTime() + HOUR_MS)
     : null;
 
-  // A Wall spot has no hour to print, so it says what it is instead.
-  const headline =
-    entry.kind === "wall"
-      ? "is on The Wall"
-      : hours.length > 1
-        ? `owned the homepage for ${hours.length} hours`
-        : "owned the homepage";
+  const headline = upcoming ? "is on The Wall" : "owned the homepage";
   const when =
     first && last ? `${clock(first)} – ${clock(last)} · ${day(first)} UTC` : "permanent";
 
@@ -134,7 +132,7 @@ export function ReceiptCard({
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
             <div style={{ display: "flex", fontSize: 24, letterSpacing: 3, color: DIM }}>
-              BOARD PRICE NOW
+              #1 COSTS NOW
             </div>
             <div
               style={{
@@ -145,7 +143,7 @@ export function ReceiptCard({
                 color: ACCENT,
               }}
             >
-              {formatPrice(boardPrice)}
+              {formatPrice(numberOneCents)}
             </div>
           </div>
         </div>

@@ -1,80 +1,61 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import { EMPTY_WALL_TOP_CENTS, MIN_ENTRY_CENTS, formatPrice } from "@/lib/pricing";
+import { getVisitorsPerHour } from "@/lib/slots";
 
 export const metadata: Metadata = { title: "Rules" };
+export const dynamic = "force-dynamic";
 
 const RULES: [string, string][] = [
   [
-    "One product owns the homepage for one hour",
-    "Twenty-four slots a day. When your hour starts, the entire page is your name, your sentence, and your link. Nothing else is on screen.",
+    "The Wall is what you're buying",
+    "Every purchase gets a permanent row on The Wall, ranked by what was paid. Nobody is ever removed and nothing that happens later moves you down. The hour on the homepage comes with it.",
   ],
   [
-    "There is one base price for the whole board",
-    "One number sits under every open hour. It rises 20% every time somebody buys, whatever they bought or what time of day it was. Silence is only expensive once it persists: three quiet hours in a row cost nothing, and only the fourth and each one after it take 5% off. There is no ceiling.",
+    "The price comes from the Wall itself",
+    `Rank #1 costs a dollar more than the highest amount anyone has paid. That is the whole pricing system. Nothing is stored, nothing is scaled by time of day, and nothing decays — the number can only move when a real person pays, and it can only move up. On an empty Wall, #1 costs ${formatPrice(EMPTY_WALL_TOP_CENTS)}.`,
   ],
   [
-    "What an hour costs depends on when it is",
-    "The base price is scaled by the time of day, in US Eastern. 9am to 5pm costs 2x — that is prime. 5pm to midnight costs the base price. Midnight to 9am costs 0.4x, because almost nobody is awake. Daylight saving is followed, so the bands track the actual clock in New York. No hour is ever priced below $1, whatever the maths says.",
+    "You can pay any amount from $3",
+    `${formatPrice(MIN_ENTRY_CENTS)} is the minimum to get on the Wall at all. Whatever you pay is your rank: pay more than the current top and you are #1, pay less and you take the rank that amount earns. Ties go to whoever paid first.`,
   ],
   [
-    "The base price can never fall below half its all-time high",
-    "Once the board has been somewhere, it never gives all of it back. If the base price reaches $40 it never falls under $20 again, however quiet it gets. The opening price of $1 sits underneath that.",
+    "Waiting never makes it cheaper",
+    "There is no countdown, no clearance, no quiet-hour discount. The price you see is the price, and the only direction it moves is up.",
   ],
   [
-    "The price you are quoted is a minimum, not a price",
-    "You can always pay more. Paying more does not push the base price up any further — one sale moves it 20%, whether you paid the minimum or ten times it. What it buys is your rank on The Wall, and that is permanent.",
+    "You also get an hour on the homepage",
+    "When your hour starts, the entire page is your name, your sentence and your link. Nothing else is on screen. You get the earliest hour still open unless you pick a different one at checkout.",
   ],
   [
-    "The Wall never resets",
-    "Every purchase gets a permanent row on The Wall, ranked by what was paid. Nothing that happens later moves you down. You can also buy a Wall spot on its own, from $5, without buying an hour — it takes no slot, moves no price, and never expires.",
+    "An empty hour stays empty",
+    "If nobody bought the hour that is running, the homepage says so. We never fill it with somebody else's product for free.",
   ],
   [
-    "Hours can be bought in blocks",
-    "One hour, or three in a row, as long as that many consecutive hours are open. Three cost 2.5x what the first of them costs, so a block is cheaper per hour. It is one sale throughout: one announcement covering the whole run, one reminder before it, one summary after it, one row on The Wall at the full amount, and one 20% move of the base price.",
-  ],
-  [
-    "You can hold the same hour every day",
-    "A standing hour is one hour of the day, on three or seven consecutive days. It costs 2.5x or 5x what that hour costs on its own, and it is only offered when that hour is free on every one of those days. Because the days are apart, each one is its own moment and gets its own announcement and its own click count — but it is one payment, one row on The Wall at the full amount, and one 20% move of the base price.",
-  ],
-  [
-    "An unsold hour goes for $1 in its last half hour",
-    "Once an hour is less than thirty minutes from starting and still unsold, it drops to a flat $1 — no tier, no multiplier, no exceptions. It still moves the base price 20% like any other sale. Blocks and standing hours are never cleared this way, and neither is an hour anybody has already bought: the discount exists to fill one hour that is about to be wasted, not to reward waiting.",
-  ],
-  [
-    "You can buy an hour for somebody else",
-    "Tick the gift box at checkout and give two handles: theirs and yours. Their product owns the hour, their name is on the permanent page, and the launch post reads “This hour belongs to @them — gifted by @you”. The Wall entry names both. The receipt and the note to forward on both come to you, because a handle is all we ever have of them.",
-  ],
-  [
-    "The hour in progress is for sale for 15 minutes",
-    "Any hour that has not started yet is always available. The hour already running can still be bought during its first 15 minutes — you go live within about a minute of paying. After that it is gone forever, at any price, and it goes to a past buyer as a free encore instead.",
-  ],
-  [
-    "An unclaimed hour becomes an encore",
-    "If nobody buys the live hour in time, the past buyer with the most clicks gets the screen for free. Encore clicks count toward that buyer's running total, but never toward the click count shown on the hour they actually paid for.",
-  ],
-  [
-    "Your price is held for 10 minutes",
-    "Opening checkout freezes the price and holds the hour for you. If you don't finish, both are released and the hour goes back on the board.",
+    "Your name and pitch come from your own page",
+    "We read them from the link you paste. If we can't reach the page you type them in yourself. Two products can't share a name on the Wall, and links to social profiles aren't accepted — this is a list of products.",
   ],
   [
     "Booked future hours show the product name",
-    "Booked hours show the product name and a counted link. The description, full takeover, and live click counter begin when the hour starts.",
+    "Booked hours show the product name and a counted link. The full takeover and the live click counter begin when the hour starts.",
   ],
   [
     "Your page is permanent",
-    "Every purchase keeps its own page at yourhour.lol/u/your-product, with your link, your sentence, a public click count and your place on The Wall, for as long as this site exists. Paste that link anywhere and a card fills itself in: what you paid, what you got, and what an hour costs now.",
+    "Every purchase keeps its own page at yourhour.lol/u/your-product, with your link, your sentence, a public click count and your place on the Wall, for as long as this site exists. Paste that link anywhere and a card fills itself in: what you paid, what you got, and what #1 costs now.",
   ],
   [
     "Click counts are deduplicated",
-    "Repeat visits from the same person don't inflate the number. The counts are public, so they have to be honest.",
+    "Repeat visits from the same person don't inflate the number. Clicks earned during your own hour and clicks arriving later from the Wall are counted separately, and your public total is the sum. The counts are public, so they have to be honest.",
   ],
   [
     "No refunds",
-    "An hour is a time slot: once it passes, it's consumed. A Wall spot is permanent from the moment it's bought. Neither comes back.",
+    "A place on the Wall is permanent from the moment it's bought, and an hour is a time slot — once it passes it's consumed. Neither comes back.",
   ],
 ];
 
-export default function RulesPage() {
+export default async function RulesPage() {
+  const perHour = await getVisitorsPerHour();
+
   return (
     <main className="flex-1 px-6 py-16">
       <div className="mx-auto w-full max-w-xl">
@@ -82,6 +63,25 @@ export default function RulesPage() {
           ← yourhour
         </Link>
         <h1 className="mt-8 text-4xl font-semibold tracking-tight">Rules</h1>
+
+        {/* Moved off the checkout form, but not deleted: it is still the most important
+            thing a buyer should read before paying. */}
+        <div className="mt-8 rounded-2xl border border-border bg-surface p-6">
+          <h2 className="text-xs font-semibold uppercase tracking-[0.2em] text-faint">
+            What you&apos;re not buying
+          </h2>
+          <p className="mt-2.5 text-sm leading-relaxed text-muted">
+            Traffic.{" "}
+            {perHour > 0
+              ? `This site gets about ${perHour.toLocaleString()} ${perHour === 1 ? "visitor" : "visitors"} an hour right now.`
+              : "This site gets almost no traffic right now."}{" "}
+            We&apos;re not going to pretend otherwise. What you get is a permanent,
+            ranked, dofollow listing and an hour where nothing competes with you — the
+            hour is worth what you make it worth, so bring your own people and it becomes
+            a launch moment.
+          </p>
+        </div>
+
         <ol className="mt-10 space-y-8">
           {RULES.map(([title, body], i) => (
             <li key={title} className="flex gap-4">

@@ -3,9 +3,12 @@
 import { useIsClient } from "@/lib/use-client-time";
 
 /**
- * Renders a UTC instant in the visitor's own timezone. Spec section 6: the audience is
- * global and nobody should have to convert. The server has no timezone, so formatting
- * is held back until the client takes over.
+ * Renders a UTC instant in the visitor's own timezone. The audience is global and
+ * nobody should have to convert. The server has no timezone, so formatting is held back
+ * until the client takes over.
+ *
+ * Hours are stored on exact UTC hour boundaries, so a slot rendered here as "4:00 PM"
+ * really does begin at 4:00 PM where the visitor is sitting.
  */
 export function LocalTime({
   iso,
@@ -13,7 +16,7 @@ export function LocalTime({
   className,
 }: {
   iso: string;
-  mode?: "time" | "range" | "datetime" | "date";
+  mode?: "time" | "range" | "datetime" | "date" | "when";
   className?: string;
 }) {
   const isClient = useIsClient();
@@ -30,8 +33,8 @@ export function LocalTime({
 
     if (mode === "range") text = `${time(start)} – ${time(end)}`;
     else if (mode === "date") text = date(start);
-    else if (mode === "datetime")
-      text = `${time(start)} ${date(start)}`;
+    else if (mode === "datetime") text = `${time(start)} ${date(start)}`;
+    else if (mode === "when") text = `${dayWord(start)}, ${time(start)}`;
     else text = time(start);
   }
 
@@ -40,4 +43,17 @@ export function LocalTime({
       {text}
     </span>
   );
+}
+
+/**
+ * "today" / "tomorrow" / a weekday, in the visitor's zone. A buyer needs to know which
+ * day their hour lands on, and "Sun 4:00 PM" makes them work it out.
+ */
+function dayWord(at: Date): string {
+  const midnight = new Date();
+  midnight.setHours(0, 0, 0, 0);
+  const days = Math.floor((at.getTime() - midnight.getTime()) / (24 * 60 * 60 * 1000));
+  if (days === 0) return "today";
+  if (days === 1) return "tomorrow";
+  return at.toLocaleDateString([], { weekday: "long" });
 }

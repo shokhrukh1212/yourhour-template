@@ -3,6 +3,12 @@ import { DISPLAY_NAME_MAX, PITCH_MAX } from "@/lib/validate";
 export type UrlMetadata = {
   productName: string;
   pitch: string | null;
+  /**
+   * False when the page could not be read and productName is only a guess from the
+   * hostname. The claim panel uses this to decide whether to show editable name and
+   * pitch fields, so it must never be true on a fallback.
+   */
+  scraped: boolean;
 };
 
 const FETCH_TIMEOUT_MS = 5000;
@@ -101,7 +107,11 @@ async function readLimited(res: Response, maxBytes: number): Promise<string> {
 /** Fetches the listing's landing page and derives a product name and pitch from it. */
 export async function fetchUrlMetadata(url: string): Promise<UrlMetadata> {
   const hostname = new URL(url).hostname;
-  const fallback: UrlMetadata = { productName: clampName(hostnameFallback(hostname)), pitch: null };
+  const fallback: UrlMetadata = {
+    productName: clampName(hostnameFallback(hostname)),
+    pitch: null,
+    scraped: false,
+  };
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
@@ -123,6 +133,7 @@ export async function fetchUrlMetadata(url: string): Promise<UrlMetadata> {
     return {
       productName: deriveProductName(html, hostname),
       pitch: derivePitch(html),
+      scraped: true,
     };
   } catch {
     return fallback;

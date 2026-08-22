@@ -5,34 +5,35 @@ import { formatPrice } from "@/lib/pricing";
 
 /**
  * The two numbers on a buyer's permanent page that keep moving: their click count, and
- * what an hour costs now. A buyer refreshing during their own hour watches the counter
- * climb, and the price gap is the reason the page is worth posting later.
+ * what rank #1 costs now. A buyer refreshing during their own hour watches the counter
+ * climb, and the price gap is the reason the page is worth posting later -- it only ever
+ * grows, so an early entry looks better the longer it sits there.
  */
 export function LiveStats({
   slug,
   initialClicks,
-  initialBoardPrice,
+  initialNumberOne,
   pricePaid,
   rank,
 }: {
   slug: string;
   initialClicks: number;
-  initialBoardPrice: number;
+  initialNumberOne: number;
   pricePaid: number | null;
   /** Position on The Wall. Absent where there is no ranking to show. */
   rank?: number;
 }) {
   const [clicks, setClicks] = useState(initialClicks);
-  const [boardPrice, setBoardPrice] = useState(initialBoardPrice);
+  const [numberOne, setNumberOne] = useState(initialNumberOne);
 
   useEffect(() => {
     const poll = async () => {
       try {
         const res = await fetch(`/api/slot/${slug}`, { cache: "no-store" });
         if (!res.ok) return;
-        const json = (await res.json()) as { clicks?: number; boardPrice?: number };
+        const json = (await res.json()) as { clicks?: number; numberOne?: number };
         if (typeof json.clicks === "number") setClicks(json.clicks);
-        if (typeof json.boardPrice === "number") setBoardPrice(json.boardPrice);
+        if (typeof json.numberOne === "number") setNumberOne(json.numberOne);
       } catch {
         // A failed poll is not worth surfacing; the next one catches up.
       }
@@ -46,7 +47,7 @@ export function LiveStats({
       <Stat label="Clicks" value={clicks.toLocaleString()} />
       {pricePaid ? <Stat label="Paid" value={formatPrice(pricePaid)} /> : null}
       {rank ? <Stat label="Wall rank" value={`#${rank}`} /> : null}
-      <Stat label="An hour now" value={formatPrice(boardPrice)} accent />
+      <Stat label="#1 costs now" value={formatPrice(numberOne)} accent />
     </div>
   );
 }

@@ -7,12 +7,11 @@ export const dynamic = "force-dynamic";
 type LemonWebhook = {
   meta?: {
     event_name?: string;
-    custom_data?: { kind?: string; slot_id?: string; reservation_id?: string };
+    custom_data?: { slot_id?: string; reservation_id?: string };
   };
   data?: {
     id?: string;
     attributes?: {
-      user_email?: string;
       total?: number;
       status?: string;
     };
@@ -53,13 +52,10 @@ export async function POST(request: Request) {
 
   try {
     const outcome = await applyPaidOrder({
-      // Which of the two products this is. Older orders predate the field and are hours.
-      kind: payload.meta?.custom_data?.kind === "wall" ? "wall" : "hour",
       orderId: String(orderId),
       reservationId: payload.meta?.custom_data?.reservation_id ?? null,
       slotId: payload.meta?.custom_data?.slot_id || null,
       pricePaid: payload.data?.attributes?.total ?? 0,
-      email: payload.data?.attributes?.user_email ?? null,
     });
     return NextResponse.json(outcome);
   } catch (err) {

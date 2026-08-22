@@ -14,18 +14,18 @@ export const metadata: Metadata = {
     shortcut: "/icon.svg",
   },
   title: {
-    default: "yourhour — one product owns this page for one hour",
+    default: "yourhour — a permanent spot on The Wall, plus an hour on the homepage",
     template: "%s · yourhour",
   },
   description:
-    "Twenty-four slots a day. One product owns the entire homepage for exactly one hour. When your hour starts, the whole page is yours.",
+    "Buy a permanent rank on The Wall from $3. Nobody is ever removed. Every spot also owns the entire homepage for one hour.",
   openGraph: {
     type: "website",
     siteName: "yourhour",
     url: config.siteUrl,
-    title: "yourhour — one product owns this page for one hour",
+    title: "yourhour — a permanent spot on The Wall, plus an hour on the homepage",
     description:
-      "Twenty-four slots a day. One product owns the entire homepage for exactly one hour.",
+      "Buy a permanent rank on The Wall from $3. Nobody is ever removed.",
   },
   twitter: { card: "summary_large_image" },
 };

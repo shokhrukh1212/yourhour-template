@@ -6,9 +6,9 @@ import { rankForAmount } from "@/lib/wall-rank";
 /**
  * The amount a buyer chooses to pay, with the rank it buys shown live underneath.
  *
- * The floor is a minimum, not a price, and the only reason to go above it is the Wall --
- * so the rank has to move while they type, not after a round trip. `wallAmounts` is the
- * descending list of amounts already on the Wall, so the rank is a local binary search.
+ * The amount IS the rank, so the rank has to move while they type rather than after a
+ * round trip. `wallAmounts` is the descending list of amounts already on the Wall, so
+ * the rank is a local binary search.
  */
 export function AmountField({
   id,
@@ -17,8 +17,9 @@ export function AmountField({
   minimumCents,
   wallAmounts,
   capped,
-  label = "What you'll pay",
+  label = "Amount",
   hint,
+  stepCents,
 }: {
   id: string;
   value: string;
@@ -28,6 +29,8 @@ export function AmountField({
   capped: boolean;
   label?: string;
   hint?: string;
+  /** When set, renders - / + buttons that nudge the amount by this many cents. */
+  stepCents?: number;
 }) {
   const cents = parseAmountCents(value);
   const belowMinimum = cents !== null && cents < minimumCents;
@@ -40,38 +43,67 @@ export function AmountField({
         {label}{" "}
         <span className="text-faint">min {formatPrice(minimumCents)}</span>
       </label>
-      <div className="relative mt-1.5">
-        <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-base text-faint">
-          $
-        </span>
-        <input
-          id={id}
-          name={id}
-          type="number"
-          inputMode="decimal"
-          required
-          step="0.01"
-          min={(minimumCents / 100).toFixed(2)}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="w-full rounded-xl border border-border bg-background py-3 pl-8 pr-4 text-base tabular focus:border-accent focus:outline-none"
-        />
+      <div className="mt-1.5 flex items-center gap-2">
+        <div className="relative flex-1">
+          <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-base text-faint">
+            $
+          </span>
+          <input
+            id={id}
+            name={id}
+            type="number"
+            inputMode="decimal"
+            required
+            // The visible label is often just "min $3" (the panel labels the row
+            // itself), so name the field explicitly for screen readers.
+            aria-label={label || "Amount"}
+            step="0.01"
+            min={(minimumCents / 100).toFixed(2)}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            className="w-full rounded-xl border border-border bg-background py-3 pl-8 pr-4 text-base tabular focus:border-accent focus:outline-none"
+          />
+        </div>
+        {stepCents ? (
+          <div className="flex shrink-0 gap-1.5">
+            <button
+              type="button"
+              aria-label="Pay less"
+              onClick={() =>
+                onChange(
+                  (Math.max(minimumCents, (cents ?? minimumCents) - stepCents) / 100).toFixed(2),
+                )
+              }
+              className="h-11 w-11 rounded-xl border border-border text-lg text-muted transition hover:border-accent hover:text-accent"
+            >
+              −
+            </button>
+            <button
+              type="button"
+              aria-label="Pay more"
+              onClick={() => onChange((((cents ?? minimumCents) + stepCents) / 100).toFixed(2))}
+              className="h-11 w-11 rounded-xl border border-border text-lg text-muted transition hover:border-accent hover:text-accent"
+            >
+              +
+            </button>
+          </div>
+        ) : null}
       </div>
 
       {belowMinimum ? (
-        <p className="mt-1.5 text-xs text-accent">
+        <p className="mt-2 text-xs text-accent">
           The minimum is {formatPrice(minimumCents)}.
         </p>
       ) : rank !== null ? (
-        <p className="mt-1.5 text-xs text-faint">
-          This puts you at Wall rank{" "}
+        <p className="mt-2 text-xs text-faint">
+          This puts you at{" "}
           <span className="font-medium text-foreground tabular">
             #{beyondSample ? `${wallAmounts.length}+` : rank}
-          </span>
-          .
+          </span>{" "}
+          on the Wall.
         </p>
       ) : (
-        <p className="mt-1.5 text-xs text-faint">{hint ?? "Pay more, rank higher."}</p>
+        <p className="mt-2 text-xs text-faint">{hint ?? "Pay more, rank higher."}</p>
       )}
     </div>
   );
@@ -83,33 +115,4 @@ export function parseAmountCents(raw: string): number | null {
   if (!/^\d+(\.\d{1,2})?$/.test(text)) return null;
   const cents = Math.round(Number(text) * 100);
   return Number.isFinite(cents) && cents > 0 ? cents : null;
-}
-
-/** The top of the Wall, so a buyer can see what it takes to beat it. */
-export function WallTopThree({
-  top,
-}: {
-  top: { id: string; display_name: string | null; amount_paid: number }[];
-}) {
-  if (top.length === 0) return null;
-  return (
-    <div className="rounded-xl border border-border bg-background px-5 py-4">
-      <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-faint">
-        Top of The Wall
-      </h3>
-      <ul className="mt-2.5 space-y-1.5 text-sm">
-        {top.map((entry, i) => (
-          <li key={entry.id} className="flex items-center justify-between gap-3">
-            <span className="min-w-0 truncate text-muted">
-              <span className="mr-2 text-faint tabular">#{i + 1}</span>
-              {entry.display_name}
-            </span>
-            <span className="shrink-0 font-medium tabular">
-              {formatPrice(entry.amount_paid)}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
 }
