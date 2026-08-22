@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
+  <defs>
+    <linearGradient id="yh-mark" x1="8" y1="4" x2="34" y2="30" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4f6df5"/>
+      <stop offset="1" stop-color="#9333ea"/>
+    </linearGradient>
+  </defs>
+  <rect width="40" height="40" rx="9" fill="#0e0c0a"/>
+  <g stroke-linecap="round" fill="none">
+    <path d="M15 34V22" stroke="#f5f0ea" stroke-width="6"/>
+    <path d="M15 22L6 9" stroke="#f5f0ea" stroke-width="6"/>
+    <path d="M15 22L24 7" stroke="url(#yh-mark)" stroke-width="6"/>
+  </g>
+  <g stroke="url(#yh-mark)" stroke-width="3" stroke-linecap="round">
+    <path d="M27 10L31 7"/>
+    <path d="M31 15.5L36.5 14.5" opacity=".8"/>
+    <path d="M31 21L36 22" opacity=".6"/>
+    <path d="M28 26.5L31 29.5" opacity=".4"/>
+    <path d="M23.5 30.5L24.5 34" opacity=".25"/>
+  </g>
+</svg>
