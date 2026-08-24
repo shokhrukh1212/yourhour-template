@@ -4,33 +4,34 @@ import { config, isLemonSqueezyConfigured } from "@/lib/config";
 import { lockBoard, withTransaction } from "@/lib/db";
 import { createCheckout } from "@/lib/lemonsqueezy";
 import { fetchUrlMetadata } from "@/lib/metadata";
-import { MIN_ENTRY_CENTS } from "@/lib/pricing";
-import { reconcileBoard } from "@/lib/reconcile";
-import { HOUR_MS } from "@/lib/time";
-import { type ClaimInput, validateClaim } from "@/lib/validate";
-import { wallNameIsTaken, findWallEntryByUrl } from "@/lib/wall";
+import {
+  hashOwnerToken,
+  newOwnerToken,
+  OWNER_COOKIE,
+  ownerCookieOptions,
+  ownerHashesMatch,
+  ownerTokenFromRequest,
+} from "@/lib/ownership";
+import { hashIp } from "@/lib/click";
+import { jumpPrice, priceForClicks } from "@/lib/pricing";
 import { normalizeWallDomain } from "@/lib/wall-url";
-import { findFirstOpenSlotBlock, getSlotBlock, type BlockSlot } from "@/lib/slot-block";
+import { type CheckoutInput, validateCheckout } from "@/lib/validate";
 
 export const dynamic = "force-dynamic";
+
+type ReservedIntent = {
+  id: string;
+  mode: "purchase" | "jump";
+  priceCents: number;
+  clicks: number;
+  productName: string;
+  campaignId: string | null;
+  expiresAt: Date;
+};
 
 function fail(error: string, status = 400) {
   return NextResponse.json({ error }, { status });
 }
-
-type Reserved = {
-  id: string;
-  slotId: string | null;
-  startsAt: Date | null;
-  hours: number;
-  amount: number;
-  isUpgrade: boolean;
-  displayName: string;
-  imageUrl: string | null;
-  /** True when the assigned hour is past the 24-hour calendar the homepage shows. */
-  beyondHorizon: boolean;
-  expiresAt: Date;
-};
 
 export async function POST(request: Request) {
   let body: unknown;
@@ -39,238 +40,213 @@ export async function POST(request: Request) {
   } catch {
     return fail("Invalid request.");
   }
-
-  const parsed = validateClaim(body);
+  const parsed = validateCheckout(body);
   if (!parsed.ok) return fail(parsed.error);
-  const claim = parsed.value;
 
-  // Release stale holds before looking for the earliest open hour.
-  await reconcileBoard();
+  const currentToken = ownerTokenFromRequest(request);
+  const ownerToken = currentToken ?? newOwnerToken();
+  const ownerHash = hashOwnerToken(ownerToken);
 
-  // Fetched before the transaction so a slow landing page doesn't hold the board lock.
-  // The scrape is authoritative; the buyer's typed name is only a fallback for a page
-  // we could not read at all.
-  const meta = await fetchUrlMetadata(claim.url);
-  const displayName = (meta.scraped ? meta.productName : claim.name ?? meta.productName).trim();
-  const pitch = meta.scraped ? meta.pitch : claim.pitch ?? meta.pitch;
-  const imageUrl = meta.imageUrl;
-
-  // Re-checked here and not only in /api/preview: the preview is advisory, and two
-  // buyers racing on the same name must not both get through.
-  const existing = await findWallEntryByUrl(claim.url);
-  if (!existing && (await wallNameIsTaken(displayName))) {
-    return fail("Someone is already on the Wall as that product.", 409);
+  let metadata: Awaited<ReturnType<typeof fetchUrlMetadata>> | null = null;
+  if (parsed.value.mode === "purchase") {
+    // Keep an external scrape outside the serialized transaction.
+    metadata = await fetchUrlMetadata(parsed.value.url);
   }
 
-  let reserved: Reserved;
+  let reserved: ReservedIntent;
   try {
-    reserved = await reserve(claim, displayName, pitch, imageUrl);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "";
-    if (message === "TAKEN") return fail("That hour has just been taken.", 409);
-    if (message === "STARTED") return fail("That hour has already started.", 409);
-    if (message === "NOT_FOUND") return fail("That hour is not on the board.", 404);
-    if (message === "TOO_LITTLE") return fail("The minimum is $3.", 409);
-    if (message === "NOT_AN_UPGRADE") {
-      return fail("Choose an amount higher than your current Wall amount.", 409);
+    reserved = await reserveIntent(parsed.value, metadata, ownerHash, hashIp(request));
+  } catch (error) {
+    const code = error instanceof Error ? error.message : "";
+    if (code === "SOLD_OUT") {
+      return fail("Sold out for now — the queue is full. Check back soon.", 409);
     }
-    console.error("reservation failed", err);
-    return fail("Could not hold that hour. Try again.", 500);
+    if (code === "NOT_OWNER") {
+      return fail("This product already has a private owner. Open its receipt on the original device to make changes.", 403);
+    }
+    if (code === "NAME_TAKEN") return fail("Someone is already listed as that product.", 409);
+    if (code === "NOT_FOUND") return fail("Campaign not found.", 404);
+    if (code === "NOT_QUEUED") return fail("Only a queued campaign can move to the front.", 409);
+    if (code === "JUMP_PENDING") return fail("Another queue move is being paid for. Try again in a few minutes.", 409);
+    console.error("checkout intent failed", error);
+    return fail("Could not prepare checkout. Try again.", 500);
   }
 
-  const shared = {
-    slotId: reserved.slotId,
-    startsAtIso: reserved.startsAt?.toISOString() ?? null,
-    hours: reserved.hours,
-    beyondHorizon: reserved.beyondHorizon,
-    displayName: reserved.displayName,
-    isUpgrade: reserved.isUpgrade,
-  };
-
-  // Without Lemon Squeezy credentials the flow completes through a local stub so the
-  // whole purchase path can be exercised offline. Hard disabled in production.
+  let checkoutUrl: string;
   if (!isLemonSqueezyConfigured()) {
-    if (process.env.NODE_ENV === "production") {
-      await releaseReservation(reserved.id);
-      return fail("Payments are not configured.", 503);
+    if (process.env.NODE_ENV === "production") return fail("Payments are not configured.", 503);
+    checkoutUrl = `/api/dev/complete?intent=${reserved.id}`;
+  } else {
+    try {
+      checkoutUrl = await createCheckout({
+        priceCents: reserved.priceCents,
+        intentId: reserved.id,
+        expiresAt: reserved.expiresAt,
+        productName: reserved.productName,
+        mode: reserved.mode,
+        clicks: reserved.clicks,
+      });
+    } catch (error) {
+      console.error("checkout failed", error);
+      await withTransaction((client) =>
+        client.query(`UPDATE checkout_intents SET status = 'expired' WHERE id = $1`, [reserved.id]).then(() => undefined),
+      );
+      return fail("Could not start checkout. Try again.", 502);
     }
-    const devUrl = `/api/dev/complete?reservation=${reserved.id}`;
-    await withTransaction(async (client) => {
-      await client.query(`UPDATE reservations SET ls_checkout_url = $2 WHERE id = $1`, [
-        reserved.id,
-        devUrl,
-      ]);
-    });
-    return NextResponse.json({ checkoutUrl: devUrl, devMode: true, ...shared });
   }
 
-  try {
-    const checkoutUrl = await createCheckout({
-      priceCents: reserved.amount,
-      slotId: reserved.slotId,
-      hours: reserved.hours,
-      reservationId: reserved.id,
-      expiresAt: reserved.expiresAt,
-      productName: reserved.displayName,
-    });
-    await withTransaction(async (client) => {
-      await client.query(`UPDATE reservations SET ls_checkout_url = $2 WHERE id = $1`, [
-        reserved.id,
-        checkoutUrl,
-      ]);
-    });
-    return NextResponse.json({ checkoutUrl, ...shared });
-  } catch (err) {
-    console.error("checkout failed", err);
-    await releaseReservation(reserved.id);
-    return fail("Could not start checkout. Try again.", 502);
-  }
+  await withTransaction((client) =>
+    client.query(`UPDATE checkout_intents SET ls_checkout_url = $2 WHERE id = $1`, [reserved.id, checkoutUrl]).then(() => undefined),
+  );
+  const response = NextResponse.json({
+    checkoutUrl,
+    devMode: !isLemonSqueezyConfigured(),
+    intentId: reserved.id,
+    campaignId: reserved.campaignId,
+    priceCents: reserved.priceCents,
+  });
+  if (!currentToken) response.cookies.set(OWNER_COOKIE, ownerToken, ownerCookieOptions);
+  return response;
 }
 
-/**
- * Records the hour a new listing asked for, or an entry upgrade. Checkout never locks an
- * hour: people who abandon an external payment page must not make the calendar look
- * unavailable. The first payment to arrive receives its requested open hour.
- */
-async function reserve(
-  claim: ClaimInput,
-  displayName: string,
-  pitch: string | null,
-  imageUrl: string | null,
-): Promise<Reserved> {
-  if (claim.amountCents < MIN_ENTRY_CENTS) throw new Error("TOO_LITTLE");
-
+async function reserveIntent(
+  input: CheckoutInput,
+  metadata: Awaited<ReturnType<typeof fetchUrlMetadata>> | null,
+  ownerHash: string,
+  purchaseIpHash: string,
+): Promise<ReservedIntent> {
   return withTransaction(async (client) => {
     await lockBoard(client);
-
-    const now = new Date();
-    const existing = await findExistingEntry(client, claim.url);
-
-    if (existing) {
-      if (claim.amountCents <= existing.amount_paid) throw new Error("NOT_AN_UPGRADE");
-
-      const expiresAt = new Date(now.getTime() + config.reservationMinutes * 60_000);
-      const chargeAmount = claim.amountCents - existing.amount_paid;
-      const inserted = await client.query<{ id: string }>(
-        `INSERT INTO reservations
-           (amount, upgrade_amount, upgrade_entry_id, expires_at, display_name, url, pitch, image_url, twclid)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         RETURNING id::text AS id`,
-        [
-          chargeAmount,
-          claim.amountCents,
-          existing.id,
-          expiresAt,
-          displayName,
-          claim.url,
-          pitch,
-          imageUrl,
-          claim.twclid,
-        ],
-      );
-
-      return {
-        id: inserted.rows[0].id,
-        slotId: null,
-        startsAt: null,
-        hours: 1,
-        amount: chargeAmount,
-        isUpgrade: true,
-        displayName: existing.display_name ?? displayName,
-        imageUrl,
-        beyondHorizon: false,
-        expiresAt,
-      };
-    }
-
-    let slots: BlockSlot[];
-    let beyondHorizon = false;
-
-    if (claim.slotId) {
-      const rows = await client.query<{ starts_at: Date; status: string }>(
-        `SELECT id::text AS id, starts_at, status::text AS status FROM slots
-          WHERE id = $1 FOR UPDATE`,
-        [claim.slotId],
-      );
-      const row = rows.rows[0];
-      if (!row) throw new Error("NOT_FOUND");
-      if (new Date(row.starts_at).getTime() <= now.getTime()) throw new Error("STARTED");
-      if (row.status !== "open") throw new Error("TAKEN");
-      const requested = await getSlotBlock(client, new Date(row.starts_at), claim.hours, ["open"]);
-      if (!requested) throw new Error("TAKEN");
-      slots = requested;
-    } else {
-      slots = await findFirstOpenSlotBlock(client, claim.hours, now);
-    }
-
-    const slot = slots[0];
-    const startsAt = new Date(slot.starts_at);
-    const horizonEnd = Date.now() + config.calendarHours * HOUR_MS;
-    beyondHorizon = slots[slots.length - 1].starts_at.getTime() > horizonEnd;
-
-    // Never let a hold outlive the hour it is holding.
-    const holdMs = Math.min(
-      config.reservationMinutes * 60_000,
-      Math.max(startsAt.getTime() - now.getTime(), 60_000),
+    await client.query(
+      `UPDATE checkout_intents SET status = 'expired'
+        WHERE status = 'pending' AND expires_at <= now()`,
     );
-    const expiresAt = new Date(now.getTime() + holdMs);
 
+    if (input.mode === "purchase") {
+      if (!metadata) throw new Error("INVALID_METADATA");
+      return reservePurchase(client, input, metadata, ownerHash, purchaseIpHash);
+    }
+
+    const rows = await client.query<{
+      id: string;
+      product_name: string;
+      owner_token_hash: string | null;
+      status: string;
+    }>(
+      `SELECT id::text AS id, product_name, owner_token_hash,
+              status::text AS status
+         FROM campaigns WHERE id = $1 FOR UPDATE`,
+      [input.campaignId],
+    );
+    const campaign = rows.rows[0];
+    if (!campaign) throw new Error("NOT_FOUND");
+    if (!ownerHashesMatch(campaign.owner_token_hash, ownerHash)) throw new Error("NOT_OWNER");
+
+    const expiresAt = new Date(Date.now() + config.reservationMinutes * 60_000);
+    if (campaign.status !== "queued") throw new Error("NOT_QUEUED");
+    const pending = await client.query(
+      `SELECT 1 FROM checkout_intents
+        WHERE mode = 'jump' AND status = 'pending' AND expires_at > now() LIMIT 1`,
+    );
+    if (pending.rows[0]) throw new Error("JUMP_PENDING");
+    const top = await client.query<{ highest: number }>(
+      `SELECT COALESCE(max(priority_cents), 0)::int AS highest
+         FROM campaigns WHERE status = 'queued'`,
+    );
+    const priceCents = jumpPrice(top.rows[0]?.highest ?? 0);
     const inserted = await client.query<{ id: string }>(
-      `INSERT INTO reservations
-         (slot_id, hours, wall_amount, amount, expires_at, display_name, url, pitch, image_url, twclid)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      `INSERT INTO checkout_intents
+         (mode, campaign_id, expected_amount_cents, target_priority_cents,
+          owner_token_hash, expires_at)
+       VALUES ('jump', $1, $2, $2, $3, $4)
        RETURNING id::text AS id`,
-      [
-        slot.id,
-        claim.hours,
-        claim.amountCents,
-        claim.amountCents * claim.hours,
-        expiresAt,
-        displayName,
-        claim.url,
-        pitch,
-        imageUrl,
-        claim.twclid,
-      ],
+      [campaign.id, priceCents, ownerHash, expiresAt],
     );
-
     return {
       id: inserted.rows[0].id,
-      slotId: slot.id,
-      startsAt,
-      hours: claim.hours,
-      amount: claim.amountCents * claim.hours,
-      isUpgrade: false,
-      displayName,
-      imageUrl,
-      beyondHorizon,
+      mode: "jump",
+      priceCents,
+      clicks: 0,
+      productName: campaign.product_name,
+      campaignId: campaign.id,
       expiresAt,
     };
   });
 }
 
-type ExistingEntry = { id: string; amount_paid: number; display_name: string | null; url: string | null };
-
-/** Must run under lockBoard: the amount used to calculate the checkout difference is live. */
-async function findExistingEntry(
+async function reservePurchase(
   client: PoolClient,
-  rawUrl: string,
-): Promise<ExistingEntry | null> {
-  const domain = normalizeWallDomain(rawUrl);
-  if (!domain) return null;
-  const entries = await client.query<ExistingEntry>(
-    `SELECT id::text AS id, amount_paid, display_name, url
-       FROM wall_entries
-      ORDER BY amount_paid DESC, created_at ASC, id ASC`,
+  input: Extract<CheckoutInput, { mode: "purchase" }>,
+  metadata: Awaited<ReturnType<typeof fetchUrlMetadata>>,
+  ownerHash: string,
+  purchaseIpHash: string,
+): Promise<ReservedIntent> {
+  const all = await client.query<{
+    id: string;
+    url: string;
+    product_name: string;
+    owner_token_hash: string | null;
+    amount_paid_cents: number;
+  }>(
+    `SELECT id::text AS id, url, product_name, owner_token_hash, amount_paid_cents
+       FROM campaigns FOR UPDATE`,
   );
-  return entries.rows.find((entry) => normalizeWallDomain(entry.url) === domain) ?? null;
-}
+  const domain = normalizeWallDomain(input.url);
+  const existing = all.rows.find((row) => normalizeWallDomain(row.url) === domain) ?? null;
+  if (existing && !ownerHashesMatch(existing.owner_token_hash, ownerHash)) {
+    throw new Error("NOT_OWNER");
+  }
 
-async function releaseReservation(reservationId: string) {
-  await withTransaction(async (client) => {
-    await lockBoard(client);
-    await client.query(`UPDATE reservations SET status = 'expired' WHERE id = $1`, [
-      reservationId,
-    ]);
-  });
+  const displayName = (metadata.scraped ? metadata.productName : input.name ?? metadata.productName).trim();
+  const pitch = metadata.scraped ? metadata.pitch : input.pitch ?? metadata.pitch;
+  if (!existing && all.rows.some((row) => row.product_name.toLowerCase() === displayName.toLowerCase())) {
+    throw new Error("NAME_TAKEN");
+  }
+
+  const capacity = await client.query<{ max_clicks: number; outstanding: string; held: string }>(
+    `SELECT sc.max_outstanding_clicks AS max_clicks,
+            COALESCE((SELECT sum(clicks_purchased - (clicks_delivered - bonus_clicks) - clicks_refunded)
+                        FROM campaigns WHERE status IN ('queued','live')), 0)::text AS outstanding,
+            COALESCE((SELECT sum(clicks_delta) FROM checkout_intents
+                        WHERE mode = 'purchase' AND status = 'pending' AND expires_at > now()), 0)::text AS held
+       FROM site_config sc WHERE singleton = true`,
+  );
+  const supply = capacity.rows[0];
+  if (!supply || Number(supply.outstanding) + Number(supply.held) + input.clicks > supply.max_clicks) {
+    throw new Error("SOLD_OUT");
+  }
+
+  const packagePrice = priceForClicks(input.clicks);
+  const priceCents = packagePrice;
+  const expiresAt = new Date(Date.now() + config.reservationMinutes * 60_000);
+  const inserted = await client.query<{ id: string }>(
+    `INSERT INTO checkout_intents
+       (mode, campaign_id, clicks_delta, expected_amount_cents,
+        display_name, url, pitch, icon_url, owner_token_hash, purchase_ip_hash,
+        twclid, expires_at)
+     VALUES ('purchase', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+     RETURNING id::text AS id`,
+    [
+      existing?.id ?? null,
+      input.clicks,
+      priceCents,
+      existing?.product_name ?? displayName,
+      input.url,
+      pitch,
+      metadata.imageUrl,
+      ownerHash,
+      purchaseIpHash,
+      input.twclid,
+      expiresAt,
+    ],
+  );
+  return {
+    id: inserted.rows[0].id,
+    mode: "purchase",
+    priceCents,
+    clicks: input.clicks,
+    productName: existing?.product_name ?? displayName,
+    campaignId: existing?.id ?? null,
+    expiresAt,
+  };
 }

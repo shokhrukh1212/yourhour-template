@@ -1,43 +1,60 @@
-/**
- * What a spot on The Wall costs.
- *
- * There is no stored price. Nothing decays, nothing is scaled by time of day, and
- * nothing ever gets cheaper because a buyer waited. The only number the site quotes is
- * derived from the Wall itself. Every quoted price is a whole dollar, so an entry can
- * always be overtaken with a number a buyer can read at a glance.
- */
+export const CLICK_RATE_CENTS = 20;
+export const MIN_ENTRY_CENTS = 500;
+export const MIN_CLICKS = Math.ceil(MIN_ENTRY_CENTS / CLICK_RATE_CENTS);
+export const MAX_CLICKS = 250;
+export const CLICK_PACKAGES = [50, 100, 200, 250] as const;
+export const DEFAULT_CLICKS = CLICK_PACKAGES[0];
+export const CLICK_STEP = 10;
 
-/** The least anyone may pay to get on the Wall at all, in cents. */
-export const MIN_ENTRY_CENTS = 300;
+export const QUEUE_JUMP_STEP_CENTS = 100;
+export const MIN_JUMP_CENTS = 200;
+const LEGACY_DISPLAY_RATE_CENTS = 25;
 
-/** The nudge buttons move in whole dollars. */
-export const OUTBID_STEP_CENTS = 100;
-
-/** What #1 costs while the Wall is still empty. */
-export const EMPTY_WALL_TOP_CENTS = 500;
+export function priceForClicks(clicks: number): number {
+  return clicks * CLICK_RATE_CENTS;
+}
 
 /**
- * The price of rank #1.
- *
- * `topAmount` is the highest `wall_entries.amount_paid`, or null on an empty Wall.
- * Stored amounts remain cents, but the price is calculated in dollars and rounded up:
- * ceil(top + $1).
+ * The six listings imported from the former time-based product have no purchased-click
+ * total. For display only, translate what they paid into whole clicks at today's rate.
+ * Their historical delivered count remains untouched, so these rows can honestly show
+ * more than 100% delivery (for example, 66 delivered / 18 paid).
  */
-export function numberOnePrice(topAmount: number | null): number {
-  return topAmount === null || topAmount <= 0 ? EMPTY_WALL_TOP_CENTS : priceToOvertake(topAmount);
+export function paidClicksForDisplay(campaign: {
+  clicks_purchased: number;
+  amount_paid_cents: number;
+  status: "queued" | "live" | "delivered";
+  started_at: Date | string | null;
+  delivered_at: Date | string | null;
+}): number {
+  const isLegacyTimePurchase =
+    campaign.status === "delivered" &&
+    campaign.started_at === null &&
+    campaign.delivered_at === null;
+  return isLegacyTimePurchase
+    ? Math.max(1, Math.floor(campaign.amount_paid_cents / LEGACY_DISPLAY_RATE_CENTS))
+    : campaign.clicks_purchased;
 }
 
-/** The whole-dollar price needed to move directly ahead of an entry at `amountCents`. */
-export function priceToOvertake(amountCents: number): number {
-  return Math.max(MIN_ENTRY_CENTS, roundUpToWholeDollar(amountCents + OUTBID_STEP_CENTS));
+export function clickPackageForInput(raw: string): (typeof CLICK_PACKAGES)[number] | null {
+  if (!/^\d+$/.test(raw)) return null;
+  const value = Number(raw);
+  return CLICK_PACKAGES.find((option) => option === value) ?? null;
 }
 
-/** Every public dollar amount is rounded up, while the stored cents stay untouched. */
-export function roundUpToWholeDollar(cents: number): number {
-  return Math.ceil(cents / 100) * 100;
+export function jumpPrice(highestQueuedPriority: number | null): number {
+  return Math.max(MIN_JUMP_CENTS, (highestQueuedPriority ?? 0) + QUEUE_JUMP_STEP_CENTS);
 }
 
-/** Public money never exposes cents. */
 export function formatPrice(cents: number): string {
-  return `$${(roundUpToWholeDollar(cents) / 100).toLocaleString("en-US")}`;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: cents % 100 === 0 ? 0 : 2,
+    maximumFractionDigits: 2,
+  }).format(cents / 100);
+}
+
+export function formatClickRate(cents = CLICK_RATE_CENTS): string {
+  return cents < 100 ? `${cents}¢` : formatPrice(cents);
 }

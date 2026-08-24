@@ -1,142 +1,197 @@
--- yourhour.lol schema
--- All timestamps UTC. All money in integer cents.
---
--- Re-run in full by `npm run migrate`, so every statement here must be idempotent.
+-- yourhour.lol guaranteed-click campaign schema.
+-- All timestamps are UTC and all money is stored in integer cents.
+-- Run with `npm run migrate` during the purchase-only maintenance window.
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 DO $$ BEGIN
-  CREATE TYPE slot_status AS ENUM ('open','reserved','sold','past');
+  CREATE TYPE campaign_status AS ENUM ('queued', 'live', 'delivered');
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
--- ---------------------------------------------------------------------------
--- THE WALL. One row per purchase, permanent, ranked by amount_paid. This owns the
--- slug, the public page, and the rank -- the slot does not.
--- ---------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS wall_entries (
-  id           bigserial PRIMARY KEY,
-  amount_paid  integer NOT NULL,
-  display_name text,
-  url          text,
-  pitch        text CHECK (pitch IS NULL OR char_length(pitch) <= 180),
-  image_url    text,
-  slug         text,
-  -- Clicks arriving through /w/{id} (the Wall and the permanent page). Clicks earned
-  -- during the buyer's own hour live on the slot, so an hour row never stops meaning
-  -- "clicks earned during that hour".
-  clicks       integer NOT NULL DEFAULT 0,
-  ls_order_id  text UNIQUE,                     -- webhook idempotency key
+CREATE TABLE IF NOT EXISTS campaigns (
+  id                    bigserial PRIMARY KEY,
+  slug                  text NOT NULL,
+  url                   text NOT NULL,
+  product_name          text NOT NULL,
+  pitch                 text CHECK (pitch IS NULL OR char_length(pitch) <= 180),
+  icon_url              text,
+  clicks_purchased      integer NOT NULL CHECK (clicks_purchased >= 0),
+  clicks_delivered      integer NOT NULL DEFAULT 0 CHECK (clicks_delivered >= 0),
+  bonus_clicks          integer NOT NULL DEFAULT 0 CHECK (bonus_clicks >= 0),
+  bonus_click_cap       integer CHECK (bonus_click_cap IS NULL OR bonus_click_cap >= 0),
+  clicks_refunded       integer NOT NULL DEFAULT 0 CHECK (clicks_refunded >= 0),
+  amount_paid_cents     integer NOT NULL CHECK (amount_paid_cents >= 0),
+  priority_cents        integer NOT NULL DEFAULT 0 CHECK (priority_cents >= 0),
+  status                campaign_status NOT NULL DEFAULT 'queued',
+  owner_token_hash      text,
+  created_at            timestamptz NOT NULL DEFAULT now(),
+  started_at            timestamptz,
+  delivered_at          timestamptz,
+  CHECK (bonus_clicks <= clicks_delivered),
+  CHECK (bonus_click_cap IS NULL OR bonus_clicks <= bonus_click_cap),
+  CHECK (clicks_delivered - bonus_clicks <= clicks_purchased),
+  CHECK (clicks_refunded <= clicks_purchased - (clicks_delivered - bonus_clicks))
+);
+
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS bonus_clicks integer NOT NULL DEFAULT 0;
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS bonus_click_cap integer;
+DO $$
+DECLARE old_check record;
+BEGIN
+  FOR old_check IN
+    SELECT conname
+      FROM pg_constraint
+     WHERE conrelid = 'campaigns'::regclass
+       AND contype = 'c'
+       AND (
+         pg_get_constraintdef(oid) ~ 'clicks_delivered[^)]*<= clicks_purchased'
+         OR pg_get_constraintdef(oid) ~ 'clicks_refunded[^)]*<= \(clicks_purchased - clicks_delivered\)'
+       )
+  LOOP
+    EXECUTE format('ALTER TABLE campaigns DROP CONSTRAINT %I', old_check.conname);
+  END LOOP;
+END $$;
+ALTER TABLE campaigns DROP CONSTRAINT IF EXISTS campaigns_clicks_delivered_check;
+ALTER TABLE campaigns DROP CONSTRAINT IF EXISTS campaigns_clicks_refunded_check;
+ALTER TABLE campaigns DROP CONSTRAINT IF EXISTS campaigns_bonus_clicks_check;
+ALTER TABLE campaigns DROP CONSTRAINT IF EXISTS campaigns_bonus_click_cap_check;
+ALTER TABLE campaigns DROP CONSTRAINT IF EXISTS campaigns_guaranteed_clicks_check;
+ALTER TABLE campaigns DROP CONSTRAINT IF EXISTS campaigns_refundable_clicks_check;
+ALTER TABLE campaigns ADD CONSTRAINT campaigns_bonus_clicks_check
+  CHECK (bonus_clicks >= 0 AND bonus_clicks <= clicks_delivered);
+ALTER TABLE campaigns ADD CONSTRAINT campaigns_bonus_click_cap_check
+  CHECK (bonus_click_cap IS NULL OR (bonus_click_cap >= 0 AND bonus_clicks <= bonus_click_cap));
+ALTER TABLE campaigns ADD CONSTRAINT campaigns_guaranteed_clicks_check
+  CHECK (clicks_delivered - bonus_clicks <= clicks_purchased);
+ALTER TABLE campaigns ADD CONSTRAINT campaigns_refundable_clicks_check
+  CHECK (clicks_refunded <= clicks_purchased - (clicks_delivered - bonus_clicks));
+
+CREATE UNIQUE INDEX IF NOT EXISTS campaigns_slug_idx ON campaigns (slug);
+CREATE UNIQUE INDEX IF NOT EXISTS campaigns_one_live_idx
+  ON campaigns ((1)) WHERE status = 'live';
+CREATE INDEX IF NOT EXISTS campaigns_queue_idx
+  ON campaigns (priority_cents DESC, created_at ASC, id ASC) WHERE status = 'queued';
+CREATE INDEX IF NOT EXISTS campaigns_rank_idx
+  ON campaigns (amount_paid_cents DESC, created_at ASC, id ASC);
+CREATE INDEX IF NOT EXISTS campaigns_status_idx ON campaigns (status);
+
+-- One durable row per attempted payment. Completed click purchases double as the
+-- refund ledger; jump and leaderboard payments are deliberately never refundable by
+-- the delivery guarantee.
+CREATE TABLE IF NOT EXISTS checkout_intents (
+  id                     uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  mode                   text NOT NULL CHECK (mode IN ('purchase','jump')),
+  campaign_id            bigint REFERENCES campaigns(id) ON DELETE CASCADE,
+  clicks_delta           integer NOT NULL DEFAULT 0 CHECK (clicks_delta >= 0),
+  expected_amount_cents  integer NOT NULL CHECK (expected_amount_cents > 0),
+  target_amount_cents    integer,
+  target_priority_cents  integer,
+  display_name           text,
+  url                    text,
+  pitch                  text CHECK (pitch IS NULL OR char_length(pitch) <= 180),
+  icon_url               text,
+  owner_token_hash       text,
+  purchase_ip_hash       text,
+  twclid                 text,
+  status                 text NOT NULL DEFAULT 'pending'
+                           CHECK (status IN ('pending','completed','expired')),
+  expires_at             timestamptz NOT NULL,
+  ls_checkout_url        text,
+  ls_order_id            text UNIQUE,
+  provider_total_cents   integer,
+  refund_target_cents    integer NOT NULL DEFAULT 0 CHECK (refund_target_cents >= 0),
+  refunded_cents         integer NOT NULL DEFAULT 0 CHECK (refunded_cents >= 0),
+  refund_lock_until      timestamptz,
+  created_at             timestamptz NOT NULL DEFAULT now(),
+  completed_at           timestamptz
+);
+
+CREATE INDEX IF NOT EXISTS checkout_intents_pending_idx
+  ON checkout_intents (expires_at) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS checkout_intents_campaign_idx
+  ON checkout_intents (campaign_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS checkout_intents_refunds_idx
+  ON checkout_intents (campaign_id)
+  WHERE refund_target_cents > refunded_cents;
+
+ALTER TABLE checkout_intents ADD COLUMN IF NOT EXISTS refund_lock_until timestamptz;
+
+-- Retire the former standalone leaderboard payment mode. Completed historical rows
+-- remain valid receipts; when none exist, tighten the database constraint as well.
+UPDATE checkout_intents
+   SET status = 'expired'
+ WHERE mode = 'rank_boost' AND status = 'pending';
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM checkout_intents WHERE mode = 'rank_boost') THEN
+    ALTER TABLE checkout_intents DROP CONSTRAINT IF EXISTS checkout_intents_mode_check;
+    ALTER TABLE checkout_intents ADD CONSTRAINT checkout_intents_mode_check
+      CHECK (mode IN ('purchase','jump'));
+  END IF;
+END $$;
+
+-- The only click campaign sold before the August 2026 price change paid $5 for 20
+-- clicks. Honor the new 20-cent rate by extending that same purchase to 25 clicks
+-- without changing clicks already delivered. If it completed during deployment,
+-- reopen it (or queue it when another campaign is already live).
+DO $$
+DECLARE
+  one_hour_id bigint;
+  another_live boolean;
+BEGIN
+  SELECT id INTO one_hour_id
+    FROM campaigns
+   WHERE slug = 'one-hour'
+     AND lower(product_name) = 'one hour'
+     AND amount_paid_cents = 500
+     AND clicks_purchased = 20
+   ORDER BY id DESC
+   LIMIT 1
+   FOR UPDATE;
+
+  IF one_hour_id IS NOT NULL THEN
+    UPDATE checkout_intents
+       SET clicks_delta = 25
+     WHERE campaign_id = one_hour_id
+       AND mode = 'purchase'
+       AND status = 'completed'
+       AND expected_amount_cents = 500
+       AND clicks_delta = 20;
+
+    SELECT EXISTS (
+      SELECT 1 FROM campaigns WHERE status = 'live' AND id <> one_hour_id
+    ) INTO another_live;
+
+    UPDATE campaigns
+       SET clicks_purchased = 25,
+           status = CASE
+             WHEN another_live AND status = 'delivered' THEN 'queued'::campaign_status
+             WHEN NOT another_live THEN 'live'::campaign_status
+             ELSE status
+           END,
+           started_at = CASE WHEN NOT another_live THEN COALESCE(started_at, now()) ELSE started_at END,
+           delivered_at = NULL
+     WHERE id = one_hour_id;
+  END IF;
+END $$;
+
+-- The hour bucket is strictly a click-dedupe window, not a purchasable time unit.
+CREATE TABLE IF NOT EXISTS campaign_clicks (
+  campaign_id  bigint NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  ip_hash      text NOT NULL,
+  hour_bucket  timestamptz NOT NULL,
+  is_bonus     boolean NOT NULL DEFAULT false,
   created_at   timestamptz NOT NULL DEFAULT now(),
-  -- Historical: how a pre-Wall slot row was linked to the entry backfilled from it.
-  source_slot_id bigint
+  PRIMARY KEY (campaign_id, ip_hash, hour_bucket)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS wall_entries_slug_idx
-  ON wall_entries (slug) WHERE slug IS NOT NULL;
-CREATE INDEX IF NOT EXISTS wall_entries_rank_idx
-  ON wall_entries (amount_paid DESC, created_at ASC);
-CREATE UNIQUE INDEX IF NOT EXISTS wall_entries_source_slot_idx
-  ON wall_entries (source_slot_id) WHERE source_slot_id IS NOT NULL;
+ALTER TABLE campaign_clicks ADD COLUMN IF NOT EXISTS is_bonus boolean NOT NULL DEFAULT false;
 
--- ---------------------------------------------------------------------------
--- The calendar. One row per clock hour; starts_at is always exactly on the hour, UTC.
--- ---------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS slots (
-  id            bigserial PRIMARY KEY,
-  starts_at     timestamptz NOT NULL UNIQUE,
-  status        slot_status NOT NULL DEFAULT 'open',
-  display_name  text,
-  url           text,
-  pitch         text CHECK (pitch IS NULL OR char_length(pitch) <= 180),
-  image_url     text,
-  claim_number  bigint UNIQUE,
-  price_paid    integer,
-  clicks        integer NOT NULL DEFAULT 0,
-  sold_at       timestamptz,
-  ls_order_id   text,
-  wall_entry_id bigint REFERENCES wall_entries(id),
-  -- Legacy slug column. New sales put the slug on wall_entries; this is only still
-  -- populated for rows that predate the Wall.
-  slug          text,
-  -- FROZEN HISTORICAL DATA. The encore feature (free airtime for a past buyer in an
-  -- unsold hour) is gone, but these clicks were real. Never read, never written.
-  encore_clicks integer NOT NULL DEFAULT 0,
-  created_at    timestamptz NOT NULL DEFAULT now()
-);
+CREATE INDEX IF NOT EXISTS campaign_clicks_created_idx ON campaign_clicks (created_at);
 
-CREATE INDEX IF NOT EXISTS slots_starts_at_idx ON slots (starts_at);
-CREATE INDEX IF NOT EXISTS slots_status_starts_at_idx ON slots (status, starts_at);
-CREATE INDEX IF NOT EXISTS slots_sold_at_idx ON slots (sold_at) WHERE sold_at IS NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS slots_claim_number_idx
-  ON slots (claim_number) WHERE claim_number IS NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS slots_slug_idx ON slots (slug) WHERE slug IS NOT NULL;
-CREATE INDEX IF NOT EXISTS slots_wall_entry_idx ON slots (wall_entry_id);
-CREATE INDEX IF NOT EXISTS slots_ls_order_idx ON slots (ls_order_id);
-
-CREATE SEQUENCE IF NOT EXISTS claim_number_seq START WITH 1;
-SELECT setval(
-  'claim_number_seq',
-  COALESCE((SELECT max(claim_number) FROM slots), 1),
-  EXISTS (SELECT 1 FROM slots WHERE claim_number IS NOT NULL)
-);
-
--- ---------------------------------------------------------------------------
--- Checkout holds the hour it assigned, so the hour quoted before payment is the hour
--- delivered after it. It holds no price: the price is derived from the Wall and only
--- ever rises, so there is nothing to freeze.
--- ---------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS reservations (
-  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  slot_id         bigint REFERENCES slots(id) ON DELETE CASCADE,
-  -- One order can own a consecutive run of homepage hours. slot_id is its first hour.
-  hours           integer NOT NULL DEFAULT 1 CHECK (hours IN (1, 2, 3, 6)),
-  -- The per-hour bid sets the permanent Wall rank; amount is the total checkout charge.
-  wall_amount     integer,
-  amount          integer,
-  expires_at      timestamptz NOT NULL,
-  ls_checkout_url text,
-  display_name    text,
-  url             text,
-  pitch           text,
-  image_url       text,
-  status          text NOT NULL DEFAULT 'pending',  -- pending | completed | expired
-  -- Set when the payment lands. This is how /success finds the sale it just paid for
-  -- without guessing at a slug that is assigned inside the sale transaction.
-  wall_entry_id   bigint REFERENCES wall_entries(id),
-  -- An upgrade changes this existing entry instead of creating a row or consuming an
-  -- hour. `amount` is the amount charged; `upgrade_amount` is its resulting Wall bid.
-  upgrade_entry_id bigint REFERENCES wall_entries(id),
-  upgrade_amount   integer,
-  created_at      timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS reservations_pending_slot_idx
-  ON reservations (slot_id) WHERE status = 'pending';
-CREATE INDEX IF NOT EXISTS reservations_expiry_idx
-  ON reservations (expires_at) WHERE status = 'pending';
-
--- ---------------------------------------------------------------------------
--- Clicks. Dedupe is enforced by the primary key, never by app logic.
--- ---------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS clicks (
-  slot_id    bigint NOT NULL REFERENCES slots(id) ON DELETE CASCADE,
-  ip_hash    text NOT NULL,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (slot_id, ip_hash)
-);
-
-CREATE TABLE IF NOT EXISTS wall_clicks (
-  entry_id   bigint NOT NULL REFERENCES wall_entries(id) ON DELETE CASCADE,
-  ip_hash    text NOT NULL,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (entry_id, ip_hash)
-);
-
--- ---------------------------------------------------------------------------
--- Anonymous, browser-backed unique visitors. Server renders and bots without
--- JavaScript do not create rows, so the header cannot be inflated by page requests.
--- ---------------------------------------------------------------------------
+-- Anonymous browser-backed visitors power the cumulative since-launch count. This is
+-- deliberately independent from campaign delivery and stores no network address.
 CREATE TABLE IF NOT EXISTS visitors (
   id             uuid PRIMARY KEY,
   first_seen_at  timestamptz NOT NULL DEFAULT now(),
@@ -145,104 +200,112 @@ CREATE TABLE IF NOT EXISTS visitors (
 
 CREATE INDEX IF NOT EXISTS visitors_last_seen_idx ON visitors (last_seen_at);
 
--- One row per visitor per hour they were active. The primary key does the deduping.
-CREATE TABLE IF NOT EXISTS visit_hours (
-  visitor_id uuid NOT NULL,
-  hour       timestamptz NOT NULL,
-  PRIMARY KEY (visitor_id, hour)
+-- A boolean primary key makes this a real singleton without relying on application code.
+CREATE TABLE IF NOT EXISTS site_config (
+  singleton                  boolean PRIMARY KEY DEFAULT true CHECK (singleton),
+  click_rate_cents           integer NOT NULL DEFAULT 20 CHECK (click_rate_cents = 20),
+  max_outstanding_clicks     integer NOT NULL DEFAULT 150 CHECK (max_outstanding_clicks >= 150),
+  cap_recomputed_at          timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS visit_hours_hour_idx ON visit_hours (hour);
+-- Keep the singleton aligned when this schema is applied to an existing database.
+ALTER TABLE site_config DROP CONSTRAINT IF EXISTS site_config_click_rate_cents_check;
+ALTER TABLE site_config ALTER COLUMN click_rate_cents SET DEFAULT 20;
+UPDATE site_config SET click_rate_cents = 20 WHERE singleton = true;
+ALTER TABLE site_config ADD CONSTRAINT site_config_click_rate_cents_check
+  CHECK (click_rate_cents = 20);
 
--- FROZEN HISTORICAL DATA. Generic key/value counters, written by features that no
--- longer exist (the X post spend cap) plus an archived visits_total. Nothing reads
--- this table; it is kept so those numbers are not thrown away.
-CREATE TABLE IF NOT EXISTS counters (
-  key   text PRIMARY KEY,
-  value bigint NOT NULL DEFAULT 0
-);
+INSERT INTO site_config (singleton, click_rate_cents, max_outstanding_clicks)
+VALUES (true, 20, 150)
+ON CONFLICT (singleton) DO NOTHING;
 
--- ===========================================================================
--- 2026-08-23 simplification.
---
--- Migrates a database created by the previous schema. The CREATE TABLE blocks above
--- already describe the target shape, so on a fresh database every statement here is a
--- no-op.
---
--- Deleted: the stored board price and everything that moved it (20% sale bump, -10%
--- decay, silent-hour counter, all-time-high ratchet, prime/quiet multipliers, $1
--- clearance), outbound email, the X API, gifting, standing hours, the encore, and the
--- the encore, and the separate Wall-only product.
--- ===========================================================================
-
-ALTER TABLE reservations ADD COLUMN IF NOT EXISTS wall_entry_id bigint REFERENCES wall_entries(id);
-ALTER TABLE reservations ALTER COLUMN slot_id DROP NOT NULL;
-ALTER TABLE reservations ADD COLUMN IF NOT EXISTS amount integer;
-ALTER TABLE reservations ADD COLUMN IF NOT EXISTS hours integer NOT NULL DEFAULT 1;
-ALTER TABLE reservations ADD COLUMN IF NOT EXISTS wall_amount integer;
-ALTER TABLE reservations DROP CONSTRAINT IF EXISTS reservations_hours_check;
-ALTER TABLE reservations ADD CONSTRAINT reservations_hours_check
-  CHECK (hours IN (1, 2, 3, 6));
-ALTER TABLE reservations ADD COLUMN IF NOT EXISTS upgrade_entry_id bigint REFERENCES wall_entries(id);
-ALTER TABLE reservations ADD COLUMN IF NOT EXISTS upgrade_amount integer;
-ALTER TABLE wall_entries ADD COLUMN IF NOT EXISTS image_url text;
-ALTER TABLE slots ADD COLUMN IF NOT EXISTS image_url text;
-ALTER TABLE reservations ADD COLUMN IF NOT EXISTS image_url text;
--- The Wall cards now allow a longer two-line description. Replace the old check on
--- databases created before this limit changed; existing text is preserved.
-ALTER TABLE wall_entries DROP CONSTRAINT IF EXISTS wall_entries_pitch_check;
-ALTER TABLE wall_entries ADD CONSTRAINT wall_entries_pitch_check
-  CHECK (pitch IS NULL OR char_length(pitch) <= 180);
-ALTER TABLE slots DROP CONSTRAINT IF EXISTS slots_pitch_check;
-ALTER TABLE slots ADD CONSTRAINT slots_pitch_check
-  CHECK (pitch IS NULL OR char_length(pitch) <= 180);
--- The X (Twitter) ad click id, when checkout started from an ad click. Used to match
--- the sale back to the ad in the Conversions API -- never a raw IP (see lib/click.ts).
-ALTER TABLE reservations ADD COLUMN IF NOT EXISTS twclid text;
--- Dynamic, because a plain UPDATE naming locked_price fails to PARSE once the column
--- is gone -- the guard would never get the chance to run.
+-- Preserve every permanent listing from the previous Wall as a delivered legacy
+-- campaign. Dynamic SQL keeps this migration parseable on a fresh database where the
+-- retired tables never existed.
 DO $$ BEGIN
-  IF EXISTS (SELECT 1 FROM information_schema.columns
-              WHERE table_name = 'reservations' AND column_name = 'locked_price') THEN
-    EXECUTE 'UPDATE reservations SET amount = locked_price WHERE amount IS NULL';
+  IF to_regclass('public.wall_entries') IS NOT NULL THEN
+    EXECUTE $backfill$
+      INSERT INTO campaigns
+        (id, slug, url, product_name, pitch, icon_url, clicks_purchased,
+         clicks_delivered, amount_paid_cents, priority_cents, status, created_at)
+      SELECT e.id,
+             COALESCE(e.slug, 'legacy-' || e.id::text),
+             COALESCE(e.url, 'https://yourhour.lol/u/' || COALESCE(e.slug, 'legacy-' || e.id::text)),
+             COALESCE(NULLIF(btrim(e.display_name), ''), 'Legacy product'),
+             e.pitch,
+             e.image_url,
+             GREATEST(0, e.clicks + COALESCE(s.slot_clicks, 0)),
+             GREATEST(0, e.clicks + COALESCE(s.slot_clicks, 0)),
+             GREATEST(0, e.amount_paid),
+             0,
+             'delivered'::campaign_status,
+             e.created_at
+        FROM wall_entries e
+        LEFT JOIN LATERAL (
+          SELECT COALESCE(sum(clicks), 0)::int AS slot_clicks
+            FROM slots WHERE wall_entry_id = e.id
+        ) s ON true
+      ON CONFLICT (id) DO NOTHING
+    $backfill$;
+
+    IF to_regclass('public.reservations') IS NOT NULL THEN
+      EXECUTE $intents$
+        INSERT INTO checkout_intents
+          (id, mode, campaign_id, clicks_delta, expected_amount_cents,
+           display_name, url, pitch, icon_url, status, expires_at, ls_order_id,
+           provider_total_cents, created_at, completed_at)
+        SELECT r.id, 'purchase', r.wall_entry_id, 0,
+               GREATEST(1, COALESCE(r.amount, e.amount_paid, 1)),
+               r.display_name, r.url, r.pitch, r.image_url,
+               CASE WHEN r.status = 'completed' THEN 'completed' ELSE 'expired' END,
+               r.expires_at, e.ls_order_id, r.amount, r.created_at,
+               CASE WHEN r.status = 'completed' THEN r.created_at ELSE NULL END
+          FROM reservations r
+          LEFT JOIN wall_entries e ON e.id = r.wall_entry_id
+         WHERE r.wall_entry_id IS NOT NULL
+        ON CONFLICT (id) DO NOTHING
+      $intents$;
+    END IF;
+
+    IF to_regclass('public.wall_clicks') IS NOT NULL THEN
+      EXECUTE $wallclicks$
+        INSERT INTO campaign_clicks (campaign_id, ip_hash, hour_bucket, created_at)
+        SELECT wc.entry_id, wc.ip_hash, date_trunc('hour', wc.created_at), wc.created_at
+          FROM wall_clicks wc
+          JOIN campaigns c ON c.id = wc.entry_id
+        ON CONFLICT DO NOTHING
+      $wallclicks$;
+    END IF;
+
+    IF to_regclass('public.clicks') IS NOT NULL AND to_regclass('public.slots') IS NOT NULL THEN
+      EXECUTE $slotclicks$
+        INSERT INTO campaign_clicks (campaign_id, ip_hash, hour_bucket, created_at)
+        SELECT s.wall_entry_id, c.ip_hash, date_trunc('hour', c.created_at), c.created_at
+          FROM clicks c
+          JOIN slots s ON s.id = c.slot_id
+          JOIN campaigns cp ON cp.id = s.wall_entry_id
+         WHERE s.wall_entry_id IS NOT NULL
+        ON CONFLICT DO NOTHING
+      $slotclicks$;
+    END IF;
   END IF;
 END $$;
 
--- The start slot and duration are sufficient to identify every consecutive hour in a
--- purchase; the old fan-out table is still unnecessary.
-DROP TABLE IF EXISTS reservation_slots;
+SELECT setval(
+  pg_get_serial_sequence('campaigns', 'id'),
+  COALESCE((SELECT max(id) FROM campaigns), 1),
+  EXISTS (SELECT 1 FROM campaigns)
+);
 
-ALTER TABLE reservations DROP COLUMN IF EXISTS locked_price;
-ALTER TABLE reservations DROP COLUMN IF EXISTS block_hours;
-ALTER TABLE reservations DROP COLUMN IF EXISTS standing_days;
-ALTER TABLE reservations DROP COLUMN IF EXISTS kind;
-ALTER TABLE reservations DROP COLUMN IF EXISTS gifter_handle;
-ALTER TABLE reservations DROP COLUMN IF EXISTS x_handle;
--- Lemon Squeezy is Merchant of Record and holds the buyer's email. We no longer send
--- anything, so keeping a copy is personal data with no purpose behind it.
-ALTER TABLE reservations DROP COLUMN IF EXISTS buyer_email;
-
-ALTER TABLE slots DROP COLUMN IF EXISTS buyer_email;
-ALTER TABLE slots DROP COLUMN IF EXISTS x_handle;
-ALTER TABLE slots DROP COLUMN IF EXISTS gifter_handle;
-ALTER TABLE slots DROP COLUMN IF EXISTS standing_through;
-ALTER TABLE slots DROP COLUMN IF EXISTS announced;
-ALTER TABLE slots DROP COLUMN IF EXISTS reminded;
-ALTER TABLE slots DROP COLUMN IF EXISTS completed;
-DROP INDEX IF EXISTS slots_post_number_idx;
-ALTER TABLE slots DROP COLUMN IF EXISTS post_number;
-
-ALTER TABLE wall_entries DROP COLUMN IF EXISTS buyer_email;
-ALTER TABLE wall_entries DROP COLUMN IF EXISTS x_handle;
-ALTER TABLE wall_entries DROP COLUMN IF EXISTS gifter_handle;
-ALTER TABLE wall_entries DROP COLUMN IF EXISTS standing_days;
--- Every purchase now buys a Wall rank AND an hour, so there is only one kind.
-ALTER TABLE wall_entries DROP COLUMN IF EXISTS kind;
+-- Contraction: the new application has no reads or writes against the retired model.
+DROP TABLE IF EXISTS reservation_slots CASCADE;
+DROP TABLE IF EXISTS clicks CASCADE;
+DROP TABLE IF EXISTS wall_clicks CASCADE;
+DROP TABLE IF EXISTS reservations CASCADE;
+DROP TABLE IF EXISTS slots CASCADE;
+DROP TABLE IF EXISTS wall_entries CASCADE;
+DROP TABLE IF EXISTS visit_hours CASCADE;
+DROP TABLE IF EXISTS counters CASCADE;
+DROP SEQUENCE IF EXISTS claim_number_seq;
+DROP TYPE IF EXISTS slot_status;
 DROP TYPE IF EXISTS wall_kind;
-
--- The floor, the ratchet and the decay clock all lived here.
-DROP TABLE IF EXISTS board;
-
--- NOTE: the one-time backfill that created a wall_entries row for every sold slot has
--- been REMOVED from this file on purpose. It has already run, and leaving it in would
--- resurrect entries deleted by scripts/cleanup-wall.ts on the next migrate.

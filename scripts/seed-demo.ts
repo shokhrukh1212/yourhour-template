@@ -1,108 +1,44 @@
-/**
- * Local development data only. Fills the Wall and takes a few hours so the site doesn't
- * look dead while building. Never run this against production.
- *   npx tsx --env-file=.env.local scripts/seed-demo.ts
- */
+/** Local campaign data for visual development. Never run against production. */
 import { getPool, query } from "../lib/db";
-import { reconcileBoard } from "../lib/reconcile";
-import { assignMissingSlugs } from "../lib/slug-backfill";
 
-/**
- * Demo buyers climb the same ladder the real Wall does -- each one takes #1 from the
- * last -- so the seeded Wall shows a rising price rather than invented round numbers.
- * Index 0 is the most recent hour, so the earliest buyer paid least.
- */
-function demoAmount(index: number): number {
-  return 500 + (5 - index) * 100;
-}
-
-const PAST = [
-  ["ranked.ai", "https://ranked.ai", "Get ranked everywhere you're searched. One provider. SEO, PPC, AI.", 84],
-  ["limestonedigital", "https://limestonedigital.com", "Dedicated development teams from Central Asia, hired in days not months.", 40],
-  ["overskill.com", "https://overskill.com", "Build production-ready apps in minutes with AI.", 112],
-  ["trycomp.ai", "https://trycomp.ai", "Automate SOC 2, ISO 27001, HIPAA and GDPR. Audit-ready in days.", 61],
-  ["fiber.so", "https://fiber.so", "The private wallet for your stablecoins.", 27],
-] as const;
-
-const UPCOMING = [
-  [3, "outrank.so"],
-  [7, "mytb.ai"],
+const DEMO = [
+  ["screenwar", "Screenwar", "https://screenwar.app", "A single screen that never scrolls.", 50, 18, 900, "live"],
+  ["answerdeck", "Answerdeck", "https://answerdeck.com", "Source-grounded security questionnaire answers.", 20, 0, 700, "queued"],
+  ["tamu-deals", "Tamu Deals", "https://example.com/tamu", "Better offers for growing teams.", 100, 0, 500, "queued"],
+  ["ranked", "Ranked", "https://ranked.ai", "Get ranked everywhere you're searched.", 50, 50, 1200, "delivered"],
+  ["overskill", "Overskill", "https://overskill.com", "Build production-ready apps with AI.", 100, 100, 1000, "delivered"],
+  ["fiber", "Fiber", "https://fiber.so", "The private wallet for stablecoins.", 25, 25, 500, "delivered"],
 ] as const;
 
 async function main() {
-  if (process.env.NODE_ENV === "production") {
-    throw new Error("refusing to seed demo data in production");
-  }
-
-  await query(`DELETE FROM clicks`);
-  await query(`DELETE FROM wall_clicks`);
-  await query(`DELETE FROM reservations`);
-  await query(`DELETE FROM slots`);
-  await query(`DELETE FROM wall_entries`);
-
-  // Past hours, most recent first.
-  for (const [i, [name, url, pitch, clicks]] of PAST.entries()) {
+  if (process.env.NODE_ENV === "production") throw new Error("refusing to seed production");
+  await query(`DELETE FROM campaign_clicks`);
+  await query(`DELETE FROM checkout_intents`);
+  await query(`DELETE FROM campaigns`);
+  for (const [index, item] of DEMO.entries()) {
+    const [slug, name, url, pitch, purchased, delivered, paid, status] = item;
     await query(
-      `INSERT INTO slots (starts_at, status, display_name, url, pitch, price_paid,
-                          clicks, sold_at)
-       VALUES (date_trunc('hour', now()) - ($1 || ' hours')::interval, 'past',
-               $2, $3, $4, $5, $6,
-               date_trunc('hour', now()) - ($7 || ' hours')::interval)`,
-      [i + 1, name, url, pitch, demoAmount(i), clicks, i + 4],
+      `INSERT INTO campaigns
+         (slug, product_name, url, pitch, clicks_purchased, clicks_delivered,
+          amount_paid_cents, status, created_at, started_at, delivered_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::campaign_status,
+               now() - ($9 || ' days')::interval,
+               CASE WHEN $8 <> 'queued' THEN now() - ($10 || ' hours')::interval END,
+               CASE WHEN $8 = 'delivered' THEN now() - ($11 || ' hours')::interval END)`,
+      [slug, name, url, pitch, purchased, delivered, paid, status, DEMO.length - index, index + 4, Math.max(1, index)],
     );
   }
-
-  // The hour on screen right now.
-  await query(
-    `INSERT INTO slots (starts_at, status, display_name, url, pitch, price_paid,
-                        clicks, sold_at)
-     VALUES (date_trunc('hour', now()), 'sold', 'orynth.dev', 'https://orynth.dev',
-             'Discover early-stage products, support their creators, and invest in their coins.',
-             1900, 218, now() - interval '3 hours')`,
-  );
-
-  await reconcileBoard();
-
-  // A couple of taken future hours so the calendar shows both states.
-  for (const [offset, name] of UPCOMING) {
+  const live = await query<{ id: string }>(`SELECT id::text AS id FROM campaigns WHERE status = 'live'`);
+  if (live[0]) {
     await query(
-      `UPDATE slots
-          SET status = 'sold', display_name = $2, url = 'https://example.com',
-              pitch = 'Booked ahead.', price_paid = 1900, sold_at = now()
-        WHERE starts_at = date_trunc('hour', now()) + ($1 || ' hours')::interval`,
-      [offset, name],
+      `INSERT INTO campaign_clicks (campaign_id, ip_hash, hour_bucket, created_at)
+       SELECT $1, md5(g::text), date_trunc('hour', now()), now()
+         FROM generate_series(1, 18) g`,
+      [live[0].id],
     );
   }
-
-  // Demo rows are inserted directly, so the Wall entry and the slug that the sale path
-  // would have created have to be made here. Runs last, once every sold row exists.
-  await query(
-    `INSERT INTO wall_entries (amount_paid, display_name, url, pitch, created_at, source_slot_id)
-     SELECT COALESCE(price_paid, 0), display_name, url, pitch,
-            COALESCE(sold_at, created_at), id
-       FROM slots
-      WHERE sold_at IS NOT NULL AND wall_entry_id IS NULL`,
-  );
-  await query(
-    `UPDATE slots s SET wall_entry_id = e.id
-       FROM wall_entries e
-      WHERE e.source_slot_id = s.id AND s.wall_entry_id IS NULL`,
-  );
-
-  await assignMissingSlugs();
-
-  const counts = await query<{ status: string; n: string }>(
-    `SELECT status::text AS status, count(*)::text AS n FROM slots GROUP BY status ORDER BY status`,
-  );
-  const top = await query<{ top: number | null }>(
-    `SELECT max(amount_paid) AS top FROM wall_entries`,
-  );
-  console.log("seeded:", counts.map((c) => `${c.status}=${c.n}`).join(" "));
-  console.log(`wall top: ${top[0].top ?? 0}c — #1 costs ${(top[0].top ?? 400) + 100}c`);
+  console.log(`seeded ${DEMO.length} campaigns`);
   await getPool().end();
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+main().catch((error) => { console.error(error); process.exit(1); });

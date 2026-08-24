@@ -1,24 +1,25 @@
 import { NextResponse } from "next/server";
-import { getWallClickCounts } from "@/lib/wall";
+import { query } from "@/lib/db";
 import { WALL_PAGE_SIZE } from "@/lib/wall-rank";
 
 export const dynamic = "force-dynamic";
 
-/**
- * The click counts for the entries currently on screen. The Wall calls this straight
- * after somebody opens a tracked link, so the count on the card moves the moment the
- * click is recorded instead of waiting for the next page load.
- */
 export async function GET(request: Request) {
   const ids = (new URL(request.url).searchParams.get("ids") ?? "")
     .split(",")
     .map((id) => id.trim())
-    .filter(Boolean)
-    // One page of cards is the most any caller can legitimately be showing.
-    .slice(0, WALL_PAGE_SIZE);
-
+    .filter((id) => /^\d+$/.test(id))
+    .slice(0, WALL_PAGE_SIZE + 40);
+  if (!ids.length) return NextResponse.json({ clicks: {}, bonusClicks: {} });
+  const rows = await query<{ id: string; clicks_delivered: number; bonus_clicks: number }>(
+    `SELECT id::text AS id, clicks_delivered, bonus_clicks FROM campaigns WHERE id = ANY($1::bigint[])`,
+    [ids],
+  );
   return NextResponse.json(
-    { clicks: await getWallClickCounts(ids) },
+    {
+      clicks: Object.fromEntries(rows.map((row) => [row.id, row.clicks_delivered])),
+      bonusClicks: Object.fromEntries(rows.map((row) => [row.id, row.bonus_clicks])),
+    },
     { headers: { "cache-control": "no-store" } },
   );
 }

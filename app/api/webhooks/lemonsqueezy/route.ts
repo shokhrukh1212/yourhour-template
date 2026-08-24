@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 type LemonWebhook = {
   meta?: {
     event_name?: string;
-    custom_data?: { slot_id?: string; reservation_id?: string };
+    custom_data?: { intent_id?: string; mode?: string };
   };
   data?: {
     id?: string;
@@ -53,9 +53,8 @@ export async function POST(request: Request) {
   try {
     const outcome = await applyPaidOrder({
       orderId: String(orderId),
-      reservationId: payload.meta?.custom_data?.reservation_id ?? null,
-      slotId: payload.meta?.custom_data?.slot_id || null,
-      pricePaid: payload.data?.attributes?.total ?? 0,
+      intentId: payload.meta?.custom_data?.intent_id ?? null,
+      providerTotalCents: payload.data?.attributes?.total ?? 0,
     });
     return NextResponse.json(outcome);
   } catch (err) {

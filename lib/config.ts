@@ -9,11 +9,8 @@ export const config = {
   siteUrl: process.env.SITE_URL ?? "http://localhost:3000",
   siteName: process.env.SITE_NAME ?? "yourhour",
 
-  /** How long a checkout holds the hour it was assigned. */
+  /** How long an unpaid checkout holds supply capacity. */
   reservationMinutes: int("RESERVATION_MINUTES", 10),
-
-  /** How far ahead the calendar is kept populated. */
-  calendarHours: int("CALENDAR_HOURS", 24),
 
   cronSecret: process.env.CRON_SECRET ?? "",
   ipHashSalt: process.env.IP_HASH_SALT ?? "dev-salt-change-me",

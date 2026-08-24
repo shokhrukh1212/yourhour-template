@@ -1,16 +1,11 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { getPool, query } from "../lib/db";
-import { assignMissingSlugs } from "../lib/slug-backfill";
 
 async function main() {
   const sql = readFileSync(join(process.cwd(), "lib", "schema.sql"), "utf8");
   await getPool().query(sql);
   console.log("schema applied");
-
-  // Nothing to seed: the price is derived from the Wall, not stored.
-  const backfilled = await assignMissingSlugs();
-  if (backfilled > 0) console.log(`slugs backfilled: ${backfilled}`);
 
   const tables = await query<{ table_name: string }>(
     `SELECT table_name FROM information_schema.tables

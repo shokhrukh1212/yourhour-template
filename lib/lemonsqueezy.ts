@@ -3,35 +3,36 @@ import { config } from "./config";
 
 const API = "https://api.lemonsqueezy.com/v1";
 
+export type CheckoutMode = "purchase" | "jump";
+
 export type CheckoutInput = {
   priceCents: number;
-  /** The hour this purchase was assigned, absent for a Wall-only upgrade. */
-  slotId: string | null;
-  /** Consecutive homepage hours included in this checkout. */
-  hours: number;
-  reservationId: string;
+  intentId: string;
   expiresAt: Date;
   productName: string;
+  mode: CheckoutMode;
+  clicks?: number;
 };
 
-/**
- * custom_price overrides the product's list price per checkout, which is how one Lemon
- * Squeezy variant sells a Wall rank at whatever amount the buyer chose. Nothing needs
- * setting up in the Lemon Squeezy dashboard beyond the one variant that already exists.
- *
- * No email is collected here -- Lemon Squeezy is Merchant of Record, asks for it at
- * checkout, and sends the receipt itself.
- */
+function headers() {
+  return {
+    Accept: "application/vnd.api+json",
+    "Content-Type": "application/vnd.api+json",
+    Authorization: `Bearer ${config.lemonSqueezy.apiKey}`,
+  };
+}
+
 export async function createCheckout(input: CheckoutInput): Promise<string> {
-  const { apiKey, storeId, variantId } = config.lemonSqueezy;
+  const { storeId, variantId } = config.lemonSqueezy;
+  const successUrl = `${config.siteUrl}/success?r=${input.intentId}`;
+  const description =
+    input.mode === "purchase"
+      ? `${input.productName} · ${input.clicks ?? 0} guaranteed clicks`
+      : `${input.productName} · queue jump`;
 
   const res = await fetch(`${API}/checkouts`, {
     method: "POST",
-    headers: {
-      Accept: "application/vnd.api+json",
-      "Content-Type": "application/vnd.api+json",
-      Authorization: `Bearer ${apiKey}`,
-    },
+    headers: headers(),
     body: JSON.stringify({
       data: {
         type: "checkouts",
@@ -39,23 +40,17 @@ export async function createCheckout(input: CheckoutInput): Promise<string> {
           custom_price: input.priceCents,
           expires_at: input.expiresAt.toISOString(),
           checkout_data: {
-            custom: {
-              slot_id: input.slotId,
-              // Lemon Squeezy requires every custom-data value to be a string.
-              hours: String(input.hours),
-              reservation_id: input.reservationId,
-            },
+            custom: { intent_id: input.intentId, mode: input.mode },
           },
           product_options: {
-            name: `A permanent spot on The Wall at ${config.siteName}`,
-            description: `${input.productName} · ${input.hours} homepage hour${input.hours === 1 ? "" : "s"}`,
-            // The buyer's slug is only decided inside the sale transaction, so the
-            // redirect carries the reservation id instead and /success waits for the
-            // webhook if it has not landed yet.
-            redirect_url: `${config.siteUrl}/success?r=${input.reservationId}`,
-            receipt_button_text: "See your spot",
+            name: `Guaranteed clicks from ${config.siteName}`,
+            description,
+            redirect_url: successUrl,
+            receipt_button_text: "See your campaign",
+            receipt_link_url: successUrl,
             receipt_thank_you_note:
-              "You're on The Wall. It's permanent -- nobody is ever removed.",
+              "Your product stays in the queue until every purchased click is delivered or refunded.",
+            enabled_variants: [Number(variantId)],
           },
         },
         relationships: {
@@ -70,21 +65,46 @@ export async function createCheckout(input: CheckoutInput): Promise<string> {
     const body = await res.text();
     throw new Error(`Lemon Squeezy checkout failed (${res.status}): ${body.slice(0, 400)}`);
   }
-
   const json = (await res.json()) as { data?: { attributes?: { url?: string } } };
   const url = json.data?.attributes?.url;
   if (!url) throw new Error("Lemon Squeezy returned no checkout URL");
   return url;
 }
 
-/**
- * X-Signature is an HMAC-SHA256 of the RAW request body. It must be computed on the
- * exact bytes received -- parsing and re-serialising the JSON first will never match.
- */
+type OrderResponse = {
+  data?: { attributes?: { refunded_amount?: number } };
+};
+
+export async function getRefundedAmount(orderId: string): Promise<number> {
+  const res = await fetch(`${API}/orders/${encodeURIComponent(orderId)}`, { headers: headers() });
+  if (!res.ok) throw new Error(`Could not read Lemon Squeezy order ${orderId} (${res.status})`);
+  const json = (await res.json()) as OrderResponse;
+  return json.data?.attributes?.refunded_amount ?? 0;
+}
+
+export async function issueRefund(orderId: string, amountCents: number): Promise<number> {
+  const res = await fetch(`${API}/orders/${encodeURIComponent(orderId)}/refund`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({
+      data: {
+        type: "orders",
+        id: String(orderId),
+        attributes: { amount: amountCents },
+      },
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Lemon Squeezy refund failed (${res.status}): ${body.slice(0, 400)}`);
+  }
+  const json = (await res.json()) as OrderResponse;
+  return json.data?.attributes?.refunded_amount ?? amountCents;
+}
+
 export function verifyWebhookSignature(rawBody: string, signature: string | null): boolean {
   const secret = config.lemonSqueezy.webhookSecret;
   if (!secret || !signature) return false;
-
   const expected = createHmac("sha256", secret).update(rawBody, "utf8").digest();
   let received: Buffer;
   try {
@@ -92,6 +112,5 @@ export function verifyWebhookSignature(rawBody: string, signature: string | null
   } catch {
     return false;
   }
-  if (received.length !== expected.length) return false;
-  return timingSafeEqual(expected, received);
+  return received.length === expected.length && timingSafeEqual(expected, received);
 }

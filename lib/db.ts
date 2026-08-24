@@ -22,11 +22,8 @@ function createPool(): Pool {
     // pg currently aliases sslmode=require to verify-full but will adopt weaker libpq
     // semantics in v9. Pin the strong mode now so the upgrade can't silently downgrade TLS.
     connectionString: connectionString.replace(/sslmode=(require|prefer|verify-ca)\b/, "sslmode=verify-full"),
-    // Every `date_trunc('hour', now())` in this codebase has to land on the same
-    // instant as `slots.starts_at`, which is stored on exact UTC hour boundaries. That
-    // is only true if the session zone is UTC: on a :30 or :45 offset zone
-    // (Asia/Kolkata, Asia/Kathmandu) date_trunc would floor to a non-:00 boundary and
-    // the lookups would simply stop matching. Neon happens to default to UTC; pin it.
+    // The click-dedupe bucket uses UTC boundaries. Pin the session zone so every
+    // runtime and database connection derives the same bucket.
     options: "-c timezone=UTC",
     // Neon's pooler fronts this, so keep the per-instance pool small.
     max: 3,

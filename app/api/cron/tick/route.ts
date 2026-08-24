@@ -1,19 +1,11 @@
 import { NextResponse } from "next/server";
 import { config } from "@/lib/config";
-import { reconcileBoard } from "@/lib/reconcile";
+import { runCampaignMaintenance } from "@/lib/delivery";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-/**
- * Keeps the calendar honest when nobody is looking. reconcileBoard() also runs on every
- * page render, so on a busy day this endpoint does nothing -- it exists because a day
- * with no visitors would otherwise leave finished hours showing as live and the 24-hour
- * calendar unpopulated.
- *
- * Driven by any external HTTP pinger; hourly is plenty. Idempotent, so a double fire or
- * a missed tick are both harmless.
- */
+/** Reconciles guarantees/refunds and refreshes the supply cap. Safe to retry. */
 async function handle(request: Request) {
   if (!config.cronSecret) {
     return NextResponse.json({ error: "CRON_SECRET is not set" }, { status: 503 });
@@ -28,7 +20,7 @@ async function handle(request: Request) {
   }
 
   const started = Date.now();
-  const reconciled = await reconcileBoard();
+  const reconciled = await runCampaignMaintenance();
 
   return NextResponse.json(
     { ok: true, ms: Date.now() - started, reconciled },

@@ -1,7 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  experimental: {
+    // The CLI checker can return empty captured output under Node 22.22,
+    // which makes `next build` fail before compilation starts.
+    useTypeScriptCli: false,
+  },
 };
 
 export default nextConfig;

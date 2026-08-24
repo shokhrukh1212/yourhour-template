@@ -17,24 +17,24 @@ export const metadata: Metadata = {
   // updates. Whenever the logo changes, change components/Logo.tsx and app/icon.svg
   // together -- they are the same mark drawn twice.
   title: {
-    default: "yourhour — a permanent spot on The Wall, plus an hour on the homepage",
+    default: "yourhour — guaranteed outbound clicks for 20¢ each",
     template: "%s · yourhour",
   },
   description:
-    "Buy a permanent rank on The Wall from $3. Nobody is ever removed. Every spot also owns the entire homepage for one hour.",
+    "Buy guaranteed outbound clicks for 20¢ each. Your product owns the homepage until every purchased click is delivered or refunded.",
   openGraph: {
     type: "website",
     siteName: "yourhour",
     url: config.siteUrl,
-    title: "yourhour — a permanent spot on The Wall, plus an hour on the homepage",
+    title: "yourhour — guaranteed outbound clicks for 20¢ each",
     description:
-      "Buy a permanent rank on The Wall from $3. Nobody is ever removed.",
+      "Buy guaranteed outbound clicks for 20¢ each, delivered or refunded.",
     images: [
       {
         url: "/og.png",
-        width: 1200,
-        height: 630,
-        alt: "yourhour.lol — one product owns the homepage every hour",
+        width: 1729,
+        height: 910,
+        alt: "yourhour.lol — guaranteed outbound clicks, delivered or refunded",
       },
     ],
   },

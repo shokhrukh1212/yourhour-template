@@ -15,8 +15,8 @@ test("accents are folded rather than dropped", () => {
 
 test("a name with no Latin characters still yields a usable slug", () => {
   // The collision ladder supplies the identity from here.
-  assert.equal(slugify("日本語"), "hour");
-  assert.equal(slugify("!!!"), "hour");
+  assert.equal(slugify("日本語"), "product");
+  assert.equal(slugify("!!!"), "product");
 });
 
 test("long names are capped and never end on a dash", () => {

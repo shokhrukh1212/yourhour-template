@@ -5,12 +5,12 @@ const MAX_LENGTH = 40;
 export const SLUG_PATTERN = /^[a-z0-9-]{1,64}$/;
 
 /**
- * The permanent public identity of a sold hour. Derived from the product name once, at
+ * The permanent public identity of a campaign. Derived from the product name once, at
  * sale time, and then frozen -- a posted link and a cached card both stop working if a
  * slug is ever recomputed, so nothing outside the sale path may call this on a live row.
  *
  * A name made entirely of punctuation or non-Latin script slugifies to nothing. That is
- * not an error: it falls back to "hour" and the collision suffix supplies the identity.
+ * not an error: it falls back to "product" and the collision suffix supplies the identity.
  */
 export function slugify(name: string): string {
   const slug = name
@@ -24,7 +24,7 @@ export function slugify(name: string): string {
     // Truncation can land on a dash.
     .replace(/-+$/g, "");
 
-  return slug || "hour";
+  return slug || "product";
 }
 
 /**

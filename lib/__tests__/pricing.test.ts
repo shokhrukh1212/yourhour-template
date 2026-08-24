@@ -1,81 +1,40 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  EMPTY_WALL_TOP_CENTS,
-  MIN_ENTRY_CENTS,
-  formatPrice,
-  numberOnePrice,
-  priceToOvertake,
-  roundUpToWholeDollar,
-} from "../pricing";
-import { rankForAmount } from "../wall-rank";
+import { CLICK_RATE_CENTS, MAX_CLICKS, MIN_CLICKS, MIN_ENTRY_CENTS, clickPackageForInput, formatPrice, jumpPrice, paidClicksForDisplay, priceForClicks } from "../pricing";
 
-test("an empty Wall quotes the opening price for #1", () => {
-  assert.equal(numberOnePrice(null), EMPTY_WALL_TOP_CENTS);
-  assert.equal(numberOnePrice(0), EMPTY_WALL_TOP_CENTS);
+test("click inventory has one fixed rate and exact boundaries", () => {
+  assert.equal(CLICK_RATE_CENTS, 20);
+  assert.equal(MIN_CLICKS, 25);
+  assert.equal(MAX_CLICKS, 250);
+  assert.equal(MIN_ENTRY_CENTS, 500);
+  assert.equal(priceForClicks(25), 500);
+  assert.equal(priceForClicks(50), 1000);
+  assert.equal(priceForClicks(250), 5000);
 });
 
-test("#1 costs one dollar more, rounded up to a whole dollar", () => {
-  assert.equal(numberOnePrice(470), 600);
-  assert.equal(numberOnePrice(100), 300);
-  assert.equal(numberOnePrice(12_345), 12_500);
+test("package highlighting always agrees with the exact input", () => {
+  assert.equal(clickPackageForInput("50"), 50);
+  assert.equal(clickPackageForInput("200"), 200);
+  assert.equal(clickPackageForInput("250"), 250);
+  assert.equal(clickPackageForInput("25"), null);
+  assert.equal(clickPackageForInput(""), null);
+  assert.equal(clickPackageForInput("50.0"), null);
 });
 
-test("the price only ever rises, and only when somebody pays", () => {
-  // Walk a Wall forward: each buyer takes #1, and the next #1 is strictly dearer.
-  let top: number | null = null;
-  let previous = 0;
-  for (let i = 0; i < 50; i += 1) {
-    const price = numberOnePrice(top);
-    assert.ok(price > previous, `price fell at step ${i}: ${previous} -> ${price}`);
-    previous = price;
-    top = price;
-  }
-  // Nothing in the module can lower it: there is no input that makes it fall.
-  assert.equal(numberOnePrice(previous), priceToOvertake(previous));
-});
-
-test("the minimum entry is a hardcoded $3", () => {
-  assert.equal(MIN_ENTRY_CENTS, 300);
-});
-
-test("paying the quoted #1 price actually takes rank #1", () => {
-  const wall = [470, 158, 156];
-  const price = numberOnePrice(wall[0]);
-  assert.equal(rankForAmount(wall, price), 1);
-  // Matching the top exactly is not enough -- ties go to whoever paid first.
-  assert.equal(rankForAmount(wall, wall[0]), 2);
-});
-
-test("paying less than #1 takes the rank that amount earns", () => {
-  const wall = [470, 158, 156];
-  assert.equal(rankForAmount(wall, 300), 2);
-  assert.equal(rankForAmount(wall, 157), 3);
-  assert.equal(rankForAmount(wall, MIN_ENTRY_CENTS), 2);
-});
-
-test("prices and displayed amounts round up to whole dollars", () => {
+test("money keeps meaningful cents and the minimum displays as $5", () => {
   assert.equal(formatPrice(500), "$5");
-  assert.equal(formatPrice(470), "$5");
-  assert.equal(formatPrice(570), "$6");
-  assert.equal(formatPrice(300), "$3");
-  assert.equal(formatPrice(1_234_56), "$1,235");
-  assert.equal(roundUpToWholeDollar(101), 200);
+  assert.equal(formatPrice(1000), "$10");
+  assert.equal(formatPrice(5000), "$50");
 });
 
-test("each Wall entry has a whole-dollar price to take its rank", () => {
-  assert.equal(priceToOvertake(200), 300);
-  assert.equal(priceToOvertake(470), 600);
-  assert.equal(priceToOvertake(1000), 1100);
-  assert.equal(priceToOvertake(1), MIN_ENTRY_CENTS);
+test("queue jumps start at $2 and rise one dollar above priority", () => {
+  assert.equal(jumpPrice(0), 200);
+  assert.equal(jumpPrice(200), 300);
+  assert.equal(jumpPrice(650), 750);
 });
 
-test("a button is only labelled with a rank its quoted price can actually take", () => {
-  // A $3 bid clears the tied $2 entries, so it is an honest action for #2 only.
-  const wall = [500, 200, 200, 200];
-  const price = priceToOvertake(wall[1]);
-  assert.equal(price, 300);
-  assert.equal(rankForAmount(wall, price), 2);
-  assert.notEqual(rankForAmount(wall, price), 3);
-  assert.notEqual(rankForAmount(wall, price), 4);
+test("legacy time purchases show whole paid-click equivalents without hiding overdelivery", () => {
+  assert.equal(paidClicksForDisplay({ clicks_purchased: 66, amount_paid_cents: 470, status: "delivered", started_at: null, delivered_at: null }), 18);
+  assert.equal(paidClicksForDisplay({ clicks_purchased: 47, amount_paid_cents: 600, status: "delivered", started_at: null, delivered_at: null }), 24);
+  assert.equal(paidClicksForDisplay({ clicks_purchased: 20, amount_paid_cents: 500, status: "live", started_at: new Date(), delivered_at: null }), 20);
 });

@@ -1,143 +1,78 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { estimateQueue, formatEta, getCampaignBySlug, getQueueWithLive, getRollingClicksPerHour } from "@/lib/campaigns";
+import { config } from "@/lib/config";
 import { query } from "@/lib/db";
-import { formatPrice } from "@/lib/pricing";
+import { ownerHashFromCookies, ownerHashesMatch } from "@/lib/ownership";
+import { formatPrice, jumpPrice } from "@/lib/pricing";
 import { SuccessActions, WaitingForPayment } from "./SuccessActions";
 import { XPurchaseEvent } from "./XPurchaseEvent";
-import { LocalTime } from "@/components/LocalTime";
-import { config } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
+export const metadata = { title: "You're in" };
 
-export const metadata = { title: "You're on the Wall" };
-
-type Row = {
+type IntentRow = {
   status: string;
-  amount: number | null;
-  hours: number | null;
+  mode: "purchase" | "jump";
+  clicks_delta: number;
+  expected_amount_cents: number;
+  owner_token_hash: string | null;
+  campaign_id: string | null;
   display_name: string | null;
   slug: string | null;
-  starts_at: Date | null;
-  amount_paid: number | null;
-  entry_id: string | null;
-  created_at: Date | null;
   ls_order_id: string | null;
 };
 
-/**
- * Where a buyer lands after paying. This replaced the confirmation email, so it has to
- * carry everything that email did: what they got, when their hour is, and the link to
- * the page that is now theirs.
- *
- * The slug is only decided inside the sale transaction, so Lemon Squeezy sends people
- * here with the reservation id instead. If the webhook has not landed yet the page shows
- * what it already knows and polls until it has, rather than 404ing for a second or two.
- */
-export default async function Success({
-  searchParams,
-}: {
-  searchParams: Promise<{ r?: string }>;
-}) {
-  const reservationId = (await searchParams).r ?? "";
-  if (!/^[0-9a-f-]{36}$/i.test(reservationId)) notFound();
-
-  const rows = await query<Row>(
-    `SELECT r.status, r.amount, r.hours, r.display_name,
-            e.slug, e.amount_paid, e.id::text AS entry_id, e.created_at, e.ls_order_id,
-            s.starts_at
-       FROM reservations r
-       LEFT JOIN wall_entries e ON e.id = r.wall_entry_id
-       LEFT JOIN slots s ON s.id = r.slot_id
-      WHERE r.id = $1`,
-    [reservationId],
+export default async function Success({ searchParams }: { searchParams: Promise<{ r?: string }> }) {
+  const intentId = (await searchParams).r ?? "";
+  if (!/^[0-9a-f-]{36}$/i.test(intentId)) notFound();
+  const rows = await query<IntentRow>(
+    `SELECT i.status, i.mode, i.clicks_delta, i.expected_amount_cents,
+            i.owner_token_hash, i.campaign_id::text AS campaign_id,
+            i.display_name, i.ls_order_id, c.slug
+       FROM checkout_intents i LEFT JOIN campaigns c ON c.id = i.campaign_id
+      WHERE i.id = $1`,
+    [intentId],
   );
   const row = rows[0];
   if (!row) notFound();
-
-  const name = row.display_name ?? "Your product";
-
-  if (!row.slug || !row.entry_id) {
-    return (
-      <Shell>
-        <WaitingForPayment reservationId={reservationId} name={name} />
-      </Shell>
-    );
+  const ownerHash = await ownerHashFromCookies();
+  if (!ownerHashesMatch(row.owner_token_hash, ownerHash)) notFound();
+  if (!row.slug || !row.campaign_id) {
+    return <Shell><WaitingForPayment intentId={intentId} name={row.display_name ?? "your product"} /></Shell>;
   }
 
-  // Same ordering the Wall itself uses, so the rank shown here is the rank they occupy.
-  const rankRows = await query<{ ahead: string }>(
-    `SELECT count(*)::text AS ahead FROM wall_entries
-      WHERE amount_paid > $1
-         OR (amount_paid = $1 AND (created_at, id) < ($2::timestamptz, $3::bigint))`,
-    [row.amount_paid, row.created_at, row.entry_id],
-  );
-  const rank = Number(rankRows[0]?.ahead ?? 0) + 1;
-  const paid = row.amount_paid ?? row.amount ?? 0;
-  const hours = row.hours ?? 1;
-  const pageUrl = `${config.siteUrl.replace(/^https?:\/\//, "")}/u/${row.slug}`;
+  const [campaign, queue, rate] = await Promise.all([
+    getCampaignBySlug(row.slug),
+    getQueueWithLive(),
+    getRollingClicksPerHour(),
+  ]);
+  if (!campaign) notFound();
+  const positionIndex = queue.findIndex((item) => item.id === campaign.id);
+  const queuePosition = positionIndex >= 0 ? positionIndex + 1 : null;
+  const estimates = estimateQueue(queue, rate);
+  const startsIn = campaign.status === "live" ? "now" : formatEta(estimates[campaign.id]?.start ?? null, "about ");
+  const highestPriority = Math.max(0, ...queue.filter((item) => item.status === "queued").map((item) => item.priority_cents));
+  const nextJump = jumpPrice(highestPriority);
+  const pageUrl = `${config.siteUrl.replace(/^https?:\/\//, "")}/u/${campaign.slug}`;
 
   return (
     <Shell>
-      {/* row.amount is what this specific transaction charged, matching the value the
-          server-side Conversions API call reports for the same order id -- not
-          row.amount_paid, which is the buyer's cumulative Wall bid. */}
-      <XPurchaseEvent
-        eventId={config.xPixel.purchaseEventId}
-        conversionId={row.ls_order_id ?? reservationId}
-        amountCents={row.amount ?? paid}
-      />
-      <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">
-        You&apos;re on the Wall.
-      </h1>
-
-      <p className="mt-6 text-lg">
-        <span className="font-semibold tabular text-accent">#{rank}</span>
-        <span className="mx-2 text-faint">·</span>
-        <span className="font-semibold tabular">{formatPrice(paid)}</span>
-        <span className="mx-2 text-faint">·</span>
-        <span className="text-muted">permanent</span>
-      </p>
-
-      {row.starts_at ? (
-        <p className="mt-6 text-base text-muted">
-          Your {hours} homepage hour{hours === 1 ? "" : "s"} start{hours === 1 ? "s" : ""}:{" "}
-          <span className="font-medium text-foreground">
-            <LocalTime iso={new Date(row.starts_at).toISOString()} mode="when" />
-          </span>
-        </p>
-      ) : null}
-
-      <p className="mt-2 text-base text-muted">
-        Your page:{" "}
-        <Link href={`/u/${row.slug}`} className="font-medium text-accent hover:underline">
-          {pageUrl}
-        </Link>
-      </p>
-
-      <SuccessActions
-        slug={row.slug}
-        rank={rank}
-        siteUrl={config.siteUrl}
-        startsAtIso={row.starts_at ? new Date(row.starts_at).toISOString() : null}
-      />
-
-      <p className="mt-10 text-xs leading-relaxed text-faint">
-        This page, its click count and its place on the Wall stay up for as long as this
-        site exists. Nobody is ever removed.
-      </p>
+      <XPurchaseEvent eventId={config.xPixel.purchaseEventId} conversionId={row.ls_order_id ?? intentId} amountCents={row.expected_amount_cents} />
+      <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">You&apos;re in.</h1>
+      {row.mode === "purchase" ? (
+        <>
+          <p className="mt-6 text-lg"><span className="font-semibold tabular">{row.clicks_delta} clicks</span><span className="mx-2 text-faint">·</span><span className="font-semibold tabular">{formatPrice(row.expected_amount_cents)}</span>{queuePosition ? <><span className="mx-2 text-faint">·</span><span className="font-semibold tabular text-accent">#{queuePosition} in queue</span></> : null}</p>
+          <p className="mt-4 text-base text-muted">Your clicks start {startsIn === "now" ? "now" : startsIn === "—" ? "after the campaigns ahead of you complete" : `in ${startsIn}`}.</p>
+        </>
+      ) : <p className="mt-6 text-lg">{formatPrice(row.expected_amount_cents)} moved your campaign to the front of the queue.</p>}
+      <p className="mt-6 text-base text-muted">Your page: <Link href={`/u/${campaign.slug}`} className="font-medium text-accent hover:underline">{pageUrl}</Link></p>
+      <SuccessActions slug={campaign.slug} siteUrl={config.siteUrl} clicks={row.clicks_delta} priceCents={row.expected_amount_cents} campaignId={campaign.id} jumpPriceCents={campaign.status === "queued" ? nextJump : null} />
+      <p className="mt-10 text-xs leading-relaxed text-faint">Your page, delivery progress and permanent leaderboard listing remain available after delivery.</p>
     </Shell>
   );
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
-  return (
-    <main className="flex-1 px-6 py-16">
-      <div className="mx-auto w-full max-w-xl">
-        <Link href="/" className="text-sm text-faint hover:text-accent">
-          ← yourhour
-        </Link>
-        <div className="mt-10">{children}</div>
-      </div>
-    </main>
-  );
+  return <main className="flex-1 px-6 py-16"><div className="mx-auto w-full max-w-xl"><Link href="/" className="text-sm text-faint hover:text-accent">← yourhour</Link><div className="mt-10">{children}</div></div></main>;
 }
