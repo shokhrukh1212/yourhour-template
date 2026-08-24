@@ -9,11 +9,11 @@ export const dynamic = "force-dynamic";
 const RULES: [string, string][] = [
   [
     "The Wall is what you're buying",
-    "Every purchase gets a permanent row on The Wall, ranked by what was paid. Nobody is ever removed and nothing that happens later moves you down. The hour on the homepage comes with it.",
+    "Every purchase gets a permanent row on The Wall, ranked by your bid per hour. Nobody is ever removed and nothing that happens later moves you down. Your selected homepage time comes with it.",
   ],
   [
     "The price comes from the Wall itself",
-    `Rank #1 costs a dollar more than the highest amount anyone has paid. That is the whole pricing system. Nothing is stored, nothing is scaled by time of day, and nothing decays — the number can only move when a real person pays, and it can only move up. On an empty Wall, #1 costs ${formatPrice(EMPTY_WALL_TOP_CENTS)}.`,
+    `Rank #1 costs one dollar more than the highest amount anyone has paid, rounded up to a whole dollar. That is the whole pricing system. Nothing is stored, nothing is scaled by time of day, and nothing decays — the number can only move when a real person pays, and it can only move up. On an empty Wall, #1 costs ${formatPrice(EMPTY_WALL_TOP_CENTS)}.`,
   ],
   [
     "You can pay any amount from $3",
@@ -24,11 +24,11 @@ const RULES: [string, string][] = [
     "There is no countdown, no clearance, no quiet-hour discount. The price you see is the price, and the only direction it moves is up.",
   ],
   [
-    "You also get an hour on the homepage",
-    "When your hour starts, the entire page is your name, your sentence and your link. Nothing else is on screen. You get the earliest hour still open unless you pick a different one at checkout.",
+    "You also get homepage time",
+    "Choose 1, 2, 3, or 6 consecutive hours. When your time starts, the entire page is your name, your sentence and your link. Nothing else is on screen. You get the earliest open block unless you pick a different start time at checkout.",
   ],
   [
-    "An empty hour stays empty",
+    "Empty hours stay empty",
     "If nobody bought the hour that is running, the homepage says so. We never fill it with somebody else's product for free.",
   ],
   [
@@ -37,7 +37,7 @@ const RULES: [string, string][] = [
   ],
   [
     "Booked future hours show the product name",
-    "Booked hours show the product name and a counted link. The full takeover and the live click counter begin when the hour starts.",
+    "Booked hours show the product name and a counted link. The full takeover and the live click counter begin when each hour starts.",
   ],
   [
     "Your page is permanent",
@@ -49,7 +49,7 @@ const RULES: [string, string][] = [
   ],
   [
     "No refunds",
-    "A place on the Wall is permanent from the moment it's bought, and an hour is a time slot — once it passes it's consumed. Neither comes back.",
+    "A place on the Wall is permanent from the moment it's bought, and homepage time is a time slot — once it passes it's consumed. Neither comes back.",
   ],
 ];
 

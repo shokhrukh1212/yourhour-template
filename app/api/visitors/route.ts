@@ -9,11 +9,27 @@ const VISITOR_COOKIE = "yourhour_visitor";
 const ONE_YEAR_SECONDS = 60 * 60 * 24 * 365;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+async function visitorTotal(): Promise<number> {
+  const rows = await query<{ count: string }>(`SELECT count(*)::text AS count FROM visitors`);
+  return Number(rows[0]?.count ?? 0);
+}
+
 /**
  * Counts one browser once, rather than counting every server render. The identifier is
  * random, HttpOnly, and contains no personal information.
+ *
+ * `?peek=1` returns the same total without registering anything. The hero polls this
+ * so a tab left open keeps showing a live number instead of the count as it stood when
+ * the page was rendered -- and so that polling never writes a row per tick.
  */
-export async function GET() {
+export async function GET(request: Request) {
+  if (new URL(request.url).searchParams.get("peek")) {
+    return NextResponse.json(
+      { visitors: await visitorTotal() },
+      { headers: { "cache-control": "no-store" } },
+    );
+  }
+
   const cookieStore = await cookies();
   const existingId = cookieStore.get(VISITOR_COOKIE)?.value;
   const visitorId = existingId && UUID.test(existingId) ? existingId : randomUUID();
@@ -34,9 +50,8 @@ export async function GET() {
     [visitorId],
   );
 
-  const rows = await query<{ count: string }>(`SELECT count(*)::text AS count FROM visitors`);
   const response = NextResponse.json(
-    { visitors: Number(rows[0]?.count ?? 0) },
+    { visitors: await visitorTotal() },
     { headers: { "cache-control": "no-store" } },
   );
 

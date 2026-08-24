@@ -3,9 +3,10 @@ import test from "node:test";
 import {
   EMPTY_WALL_TOP_CENTS,
   MIN_ENTRY_CENTS,
-  OUTBID_STEP_CENTS,
   formatPrice,
   numberOnePrice,
+  priceToOvertake,
+  roundUpToWholeDollar,
 } from "../pricing";
 import { rankForAmount } from "../wall-rank";
 
@@ -14,10 +15,10 @@ test("an empty Wall quotes the opening price for #1", () => {
   assert.equal(numberOnePrice(0), EMPTY_WALL_TOP_CENTS);
 });
 
-test("#1 costs a dollar more than the top of the Wall", () => {
-  assert.equal(numberOnePrice(470), 570);
-  assert.equal(numberOnePrice(100), 200);
-  assert.equal(numberOnePrice(12_345), 12_445);
+test("#1 costs one dollar more, rounded up to a whole dollar", () => {
+  assert.equal(numberOnePrice(470), 600);
+  assert.equal(numberOnePrice(100), 300);
+  assert.equal(numberOnePrice(12_345), 12_500);
 });
 
 test("the price only ever rises, and only when somebody pays", () => {
@@ -31,7 +32,7 @@ test("the price only ever rises, and only when somebody pays", () => {
     top = price;
   }
   // Nothing in the module can lower it: there is no input that makes it fall.
-  assert.equal(numberOnePrice(previous), previous + OUTBID_STEP_CENTS);
+  assert.equal(numberOnePrice(previous), priceToOvertake(previous));
 });
 
 test("the minimum entry is a hardcoded $3", () => {
@@ -53,9 +54,28 @@ test("paying less than #1 takes the rank that amount earns", () => {
   assert.equal(rankForAmount(wall, MIN_ENTRY_CENTS), 2);
 });
 
-test("formatPrice drops empty cents and keeps real ones", () => {
+test("prices and displayed amounts round up to whole dollars", () => {
   assert.equal(formatPrice(500), "$5");
-  assert.equal(formatPrice(570), "$5.70");
+  assert.equal(formatPrice(470), "$5");
+  assert.equal(formatPrice(570), "$6");
   assert.equal(formatPrice(300), "$3");
-  assert.equal(formatPrice(1_234_56), "$1,234.56");
+  assert.equal(formatPrice(1_234_56), "$1,235");
+  assert.equal(roundUpToWholeDollar(101), 200);
+});
+
+test("each Wall entry has a whole-dollar price to take its rank", () => {
+  assert.equal(priceToOvertake(200), 300);
+  assert.equal(priceToOvertake(470), 600);
+  assert.equal(priceToOvertake(1000), 1100);
+  assert.equal(priceToOvertake(1), MIN_ENTRY_CENTS);
+});
+
+test("a button is only labelled with a rank its quoted price can actually take", () => {
+  // A $3 bid clears the tied $2 entries, so it is an honest action for #2 only.
+  const wall = [500, 200, 200, 200];
+  const price = priceToOvertake(wall[1]);
+  assert.equal(price, 300);
+  assert.equal(rankForAmount(wall, price), 2);
+  assert.notEqual(rankForAmount(wall, price), 3);
+  assert.notEqual(rankForAmount(wall, price), 4);
 });

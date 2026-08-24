@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { fetchUrlMetadata } from "@/lib/metadata";
 import { checkProductUrl } from "@/lib/validate";
-import { wallNameIsTaken } from "@/lib/wall";
+import { findWallEntryByUrl, wallNameIsTaken } from "@/lib/wall";
 
 export const dynamic = "force-dynamic";
 
@@ -25,10 +25,11 @@ export async function POST(request: Request) {
   if (!check.ok) return NextResponse.json({ error: check.error }, { status: 400 });
 
   const meta = await fetchUrlMetadata(check.normalized);
+  const existing = await findWallEntryByUrl(check.normalized);
 
   // Only worth blocking on a name we actually read. A hostname guess colliding is not
   // the buyer's fault, and they get editable fields to fix it.
-  if (meta.scraped && (await wallNameIsTaken(meta.productName))) {
+  if (!existing && meta.scraped && (await wallNameIsTaken(meta.productName))) {
     return NextResponse.json(
       { error: "Someone is already on the Wall as that product." },
       { status: 409 },
@@ -40,7 +41,9 @@ export async function POST(request: Request) {
       url: check.normalized,
       productName: meta.productName,
       pitch: meta.pitch,
+      imageUrl: meta.imageUrl,
       scraped: meta.scraped,
+      existing,
     },
     { headers: { "cache-control": "no-store" } },
   );

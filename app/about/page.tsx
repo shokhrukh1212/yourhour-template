@@ -23,11 +23,11 @@ export default function AboutPage() {
             algorithm that quietly reshuffles it next month.
           </p>
           <p>
-            The price is not something we set. Rank #1 costs a dollar more than the most
-            anyone has paid, and that is the entire pricing system. It moves only when a
-            real person pays, and it only moves up. There is no countdown, no discount for
-            waiting, and nothing that gets cheaper if you close the tab — which means the
-            number you see is the honest one.
+            The price is not something we set. Rank #1 costs one dollar more than the most
+            anyone has paid, rounded up to a whole dollar. That is the entire pricing system.
+            It moves only when a real person pays, and it only moves up. There is no
+            countdown, no discount for waiting, and nothing that gets cheaper if you close
+            the tab — which means the number you see is the honest one.
           </p>
           <p>
             You can pay any amount from {formatPrice(MIN_ENTRY_CENTS)}. Whatever you pay

@@ -10,6 +10,7 @@ export type Slot = {
   display_name: string | null;
   url: string | null;
   pitch: string | null;
+  image_url: string | null;
   claim_number: number | null;
   slug: string | null;
   price_paid: number | null;
@@ -18,7 +19,7 @@ export type Slot = {
 };
 
 const PUBLIC_COLUMNS = `
-  id::text AS id, starts_at, status, display_name, url, pitch,
+  id::text AS id, starts_at, status, display_name, url, pitch, image_url,
   claim_number, slug, price_paid, clicks, sold_at
 `;
 

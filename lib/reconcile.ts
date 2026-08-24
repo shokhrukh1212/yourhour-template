@@ -70,7 +70,7 @@ export async function reconcileBoard(): Promise<ReconcileResult> {
   });
 }
 
-/** Pending reservations that timed out, or whose hour has since ended, release the slot. */
+/** Expire timed-out checkouts and undo legacy slot locks from older checkout flows. */
 async function expireReservations(client: PoolClient): Promise<number> {
   const res = await client.query(
     `UPDATE reservations r
@@ -85,17 +85,13 @@ async function expireReservations(client: PoolClient): Promise<number> {
           )
         )`,
   );
-  // Do this independently of the update above. A previously interrupted checkout can
-  // leave an orphaned `reserved` slot without a pending reservation, and that hour must
-  // never remain unavailable to buyers.
+  // Checkout no longer reserves hours. Open any future legacy locks immediately, even
+  // if their old pending reservation has not expired, so an abandoned external checkout
+  // cannot make the calendar look unavailable.
   await client.query(
     `UPDATE slots SET status = 'open'
       WHERE status = 'reserved'
-        AND starts_at + interval '1 hour' > now()
-        AND NOT EXISTS (
-          SELECT 1 FROM reservations r
-           WHERE r.slot_id = slots.id AND r.status = 'pending'
-        )`,
+        AND starts_at + interval '1 hour' > now()`,
   );
   return res.rowCount ?? 0;
 }

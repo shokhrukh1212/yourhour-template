@@ -3,6 +3,7 @@ import { DISPLAY_NAME_MAX, PITCH_MAX } from "@/lib/validate";
 export type UrlMetadata = {
   productName: string;
   pitch: string | null;
+  imageUrl: string | null;
   /**
    * False when the page could not be read and productName is only a guess from the
    * hostname. The claim panel uses this to decide whether to show editable name and
@@ -85,6 +86,21 @@ function derivePitch(html: string): string | null {
   return `${body}…`;
 }
 
+function deriveImageUrl(html: string, pageUrl: string): string | null {
+  const raw =
+    getMetaContent(html, "og:image") ??
+    getMetaContent(html, "twitter:image") ??
+    getMetaContent(html, "twitter:image:src");
+  if (!raw) return null;
+
+  try {
+    const image = new URL(raw, pageUrl);
+    return image.protocol === "http:" || image.protocol === "https:" ? image.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 async function readLimited(res: Response, maxBytes: number): Promise<string> {
   const reader = res.body?.getReader();
   if (!reader) return res.text();
@@ -110,6 +126,7 @@ export async function fetchUrlMetadata(url: string): Promise<UrlMetadata> {
   const fallback: UrlMetadata = {
     productName: clampName(hostnameFallback(hostname)),
     pitch: null,
+    imageUrl: null,
     scraped: false,
   };
 
@@ -133,6 +150,7 @@ export async function fetchUrlMetadata(url: string): Promise<UrlMetadata> {
     return {
       productName: deriveProductName(html, hostname),
       pitch: derivePitch(html),
+      imageUrl: deriveImageUrl(html, res.url || url),
       scraped: true,
     };
   } catch {

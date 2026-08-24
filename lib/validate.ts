@@ -1,6 +1,8 @@
 import { MIN_ENTRY_CENTS } from "./pricing";
+import { isHomepageHours, type HomepageHours } from "./slot-block";
 
-export const PITCH_MAX = 120;
+/** Enough room for two readable Wall-card lines before the visual clamp. */
+export const PITCH_MAX = 180;
 export const DISPLAY_NAME_MAX = 60;
 
 /** Nobody is paying this much, so anything above it is a typo or an attack. */
@@ -23,12 +25,16 @@ const SOCIAL_HOSTS = new Set([
 export type ClaimInput = {
   /** The hour the buyer picked, or null to take the earliest open one. */
   slotId: string | null;
+  /** Consecutive homepage hours to buy at the selected bid per hour. */
+  hours: HomepageHours;
   /** What the buyer chose to pay, in cents. Their permanent rank on the Wall. */
   amountCents: number;
   url: string;
   /** Only used when the scrape fails and the buyer fills the fields in by hand. */
   name: string | null;
   pitch: string | null;
+  /** X ad click id, present when checkout started from an ad click. */
+  twclid: string | null;
 };
 
 export type ValidationResult =
@@ -92,6 +98,12 @@ export function parseAmountCents(raw: unknown): number | null {
   return Number.isFinite(cents) && cents > 0 && cents <= AMOUNT_MAX_CENTS ? cents : null;
 }
 
+/** Opaque ad click id; malformed input is dropped rather than failing the claim. */
+function sanitizeTwclid(raw: unknown): string | null {
+  const text = String(raw ?? "").trim();
+  return /^[A-Za-z0-9._-]{1,128}$/.test(text) ? text : null;
+}
+
 function clamp(raw: unknown, max: number): string | null {
   const text = String(raw ?? "").trim().replace(/\s+/g, " ");
   if (!text) return null;
@@ -112,6 +124,11 @@ export function validateClaim(body: unknown): ValidationResult {
     if (!/^\d+$/.test(slotId)) return { ok: false, error: "Pick an hour." };
   }
 
+  const requestedHours = Number(raw.hours ?? 1);
+  if (!Number.isInteger(requestedHours) || !isHomepageHours(requestedHours)) {
+    return { ok: false, error: "Choose 1, 2, 3, or 6 homepage hours." };
+  }
+
   const amountCents = parseAmountCents(raw.amount);
   if (amountCents === null) return { ok: false, error: "Enter a valid amount." };
   if (amountCents < MIN_ENTRY_CENTS) return { ok: false, error: "The minimum is $3." };
@@ -123,10 +140,12 @@ export function validateClaim(body: unknown): ValidationResult {
     ok: true,
     value: {
       slotId,
+      hours: requestedHours,
       amountCents,
       url: urlCheck.normalized,
       name: clamp(raw.name, DISPLAY_NAME_MAX),
       pitch: clamp(raw.pitch, PITCH_MAX),
+      twclid: sanitizeTwclid(raw.twclid),
     },
   };
 }

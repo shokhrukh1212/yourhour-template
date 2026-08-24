@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Script from "next/script";
 import { Geist, Geist_Mono } from "next/font/google";
 import { VemetricScript } from "@vemetric/react";
 import { config } from "@/lib/config";
@@ -9,10 +10,12 @@ const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"]
 
 export const metadata: Metadata = {
   metadataBase: new URL(config.siteUrl),
-  icons: {
-    icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
-    shortcut: "/icon.svg",
-  },
+  // No `icons` here on purpose. Declaring one pins the tag to a bare "/icon.svg", and a
+  // browser that has already cached a favicon under that exact URL keeps showing the old
+  // artwork forever. Left alone, the app/icon.svg file convention emits the same file
+  // with a content hash on the URL, so changing the logo changes the URL and the tab
+  // updates. Whenever the logo changes, change components/Logo.tsx and app/icon.svg
+  // together -- they are the same mark drawn twice.
   title: {
     default: "yourhour — a permanent spot on The Wall, plus an hour on the homepage",
     template: "%s · yourhour",
@@ -26,8 +29,19 @@ export const metadata: Metadata = {
     title: "yourhour — a permanent spot on The Wall, plus an hour on the homepage",
     description:
       "Buy a permanent rank on The Wall from $3. Nobody is ever removed.",
+    images: [
+      {
+        url: "/og.png",
+        width: 1200,
+        height: 630,
+        alt: "yourhour.lol — one product owns the homepage every hour",
+      },
+    ],
   },
-  twitter: { card: "summary_large_image" },
+  twitter: {
+    card: "summary_large_image",
+    images: ["/og.png"],
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
@@ -39,6 +53,14 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="min-h-full flex flex-col">
         {vemetricToken ? <VemetricScript token={vemetricToken} /> : null}
+        {config.xPixel.id ? (
+          <Script id="x-pixel" strategy="afterInteractive">
+            {`!function(e,t,n,s,u,a){e.twq||(s=e.twq=function(){s.exe?s.exe.apply(s,arguments):s.queue.push(arguments);
+            },s.version='1.1',s.queue=[],u=t.createElement(n),u.async=!0,u.src='https://static.ads-twitter.com/uwt.js',
+            a=t.getElementsByTagName(n)[0],a.parentNode.insertBefore(u,a))}(window,document,'script');
+            twq('config','${config.xPixel.id}');`}
+          </Script>
+        ) : null}
         {children}
       </body>
     </html>

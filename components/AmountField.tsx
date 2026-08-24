@@ -20,6 +20,7 @@ export function AmountField({
   label = "Amount",
   hint,
   stepCents,
+  minimal = false,
 }: {
   id: string;
   value: string;
@@ -31,6 +32,8 @@ export function AmountField({
   hint?: string;
   /** When set, renders - / + buttons that nudge the amount by this many cents. */
   stepCents?: number;
+  /** The claim panel already supplies labels and the live rank in its summary card. */
+  minimal?: boolean;
 }) {
   const cents = parseAmountCents(value);
   const belowMinimum = cents !== null && cents < minimumCents;
@@ -39,13 +42,33 @@ export function AmountField({
 
   return (
     <div>
-      <label htmlFor={id} className="block text-sm font-medium">
-        {label}{" "}
-        <span className="text-faint">min {formatPrice(minimumCents)}</span>
-      </label>
-      <div className="mt-1.5 flex items-center gap-2">
+      {!minimal ? (
+        <label htmlFor={id} className="block text-sm font-medium">
+          {label}{" "}
+          <span className="text-faint">min {formatPrice(minimumCents)}</span>
+        </label>
+      ) : null}
+      <div
+        className={`${minimal ? "" : "mt-1.5"} grid items-stretch gap-2 ${
+          stepCents ? "grid-cols-[46px_1fr_46px]" : "grid-cols-1"
+        }`}
+      >
+        {stepCents ? (
+          <button
+            type="button"
+            aria-label="Pay less"
+            onClick={() =>
+              onChange(
+                amountInputValue(Math.max(minimumCents, (cents ?? minimumCents) - stepCents)),
+              )
+            }
+            className="rounded-[13px] border border-border bg-white/[.04] text-xl text-muted transition hover:border-violet hover:text-foreground"
+          >
+            −
+          </button>
+        ) : null}
         <div className="relative flex-1">
-          <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-base text-faint">
+          <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-base text-muted">
             $
           </span>
           <input
@@ -58,43 +81,29 @@ export function AmountField({
             // itself), so name the field explicitly for screen readers.
             aria-label={label || "Amount"}
             step="0.01"
-            min={(minimumCents / 100).toFixed(2)}
+            min={String(minimumCents / 100)}
             value={value}
             onChange={(e) => onChange(e.target.value)}
-            className="w-full rounded-xl border border-border bg-background py-3 pl-8 pr-4 text-base tabular focus:border-accent focus:outline-none"
+            className="h-12 w-full rounded-[13px] border border-border bg-black/25 pl-8 pr-4 font-bold tabular outline-none focus:border-violet"
           />
         </div>
         {stepCents ? (
-          <div className="flex shrink-0 gap-1.5">
-            <button
-              type="button"
-              aria-label="Pay less"
-              onClick={() =>
-                onChange(
-                  (Math.max(minimumCents, (cents ?? minimumCents) - stepCents) / 100).toFixed(2),
-                )
-              }
-              className="h-11 w-11 rounded-xl border border-border text-lg text-muted transition hover:border-accent hover:text-accent"
-            >
-              −
-            </button>
-            <button
-              type="button"
-              aria-label="Pay more"
-              onClick={() => onChange((((cents ?? minimumCents) + stepCents) / 100).toFixed(2))}
-              className="h-11 w-11 rounded-xl border border-border text-lg text-muted transition hover:border-accent hover:text-accent"
-            >
-              +
-            </button>
-          </div>
+          <button
+            type="button"
+            aria-label="Pay more"
+            onClick={() => onChange(amountInputValue((cents ?? minimumCents) + stepCents))}
+            className="rounded-[13px] border border-border bg-white/[.04] text-xl text-muted transition hover:border-violet hover:text-foreground"
+          >
+            +
+          </button>
         ) : null}
       </div>
 
-      {belowMinimum ? (
+      {!minimal && belowMinimum ? (
         <p className="mt-2 text-xs text-accent">
           The minimum is {formatPrice(minimumCents)}.
         </p>
-      ) : rank !== null ? (
+      ) : !minimal && rank !== null ? (
         <p className="mt-2 text-xs text-faint">
           This puts you at{" "}
           <span className="font-medium text-foreground tabular">
@@ -102,9 +111,9 @@ export function AmountField({
           </span>{" "}
           on the Wall.
         </p>
-      ) : (
+      ) : !minimal ? (
         <p className="mt-2 text-xs text-faint">{hint ?? "Pay more, rank higher."}</p>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -115,4 +124,8 @@ export function parseAmountCents(raw: string): number | null {
   if (!/^\d+(\.\d{1,2})?$/.test(text)) return null;
   const cents = Math.round(Number(text) * 100);
   return Number.isFinite(cents) && cents > 0 ? cents : null;
+}
+
+function amountInputValue(cents: number): string {
+  return String(cents / 100);
 }

@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { query } from "@/lib/db";
 import { formatPrice } from "@/lib/pricing";
 import { SuccessActions, WaitingForPayment } from "./SuccessActions";
+import { XPurchaseEvent } from "./XPurchaseEvent";
 import { LocalTime } from "@/components/LocalTime";
 import { config } from "@/lib/config";
 
@@ -13,12 +14,14 @@ export const metadata = { title: "You're on the Wall" };
 type Row = {
   status: string;
   amount: number | null;
+  hours: number | null;
   display_name: string | null;
   slug: string | null;
   starts_at: Date | null;
   amount_paid: number | null;
   entry_id: string | null;
   created_at: Date | null;
+  ls_order_id: string | null;
 };
 
 /**
@@ -39,8 +42,8 @@ export default async function Success({
   if (!/^[0-9a-f-]{36}$/i.test(reservationId)) notFound();
 
   const rows = await query<Row>(
-    `SELECT r.status, r.amount, r.display_name,
-            e.slug, e.amount_paid, e.id::text AS entry_id, e.created_at,
+    `SELECT r.status, r.amount, r.hours, r.display_name,
+            e.slug, e.amount_paid, e.id::text AS entry_id, e.created_at, e.ls_order_id,
             s.starts_at
        FROM reservations r
        LEFT JOIN wall_entries e ON e.id = r.wall_entry_id
@@ -70,10 +73,19 @@ export default async function Success({
   );
   const rank = Number(rankRows[0]?.ahead ?? 0) + 1;
   const paid = row.amount_paid ?? row.amount ?? 0;
+  const hours = row.hours ?? 1;
   const pageUrl = `${config.siteUrl.replace(/^https?:\/\//, "")}/u/${row.slug}`;
 
   return (
     <Shell>
+      {/* row.amount is what this specific transaction charged, matching the value the
+          server-side Conversions API call reports for the same order id -- not
+          row.amount_paid, which is the buyer's cumulative Wall bid. */}
+      <XPurchaseEvent
+        eventId={config.xPixel.purchaseEventId}
+        conversionId={row.ls_order_id ?? reservationId}
+        amountCents={row.amount ?? paid}
+      />
       <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">
         You&apos;re on the Wall.
       </h1>
@@ -88,7 +100,7 @@ export default async function Success({
 
       {row.starts_at ? (
         <p className="mt-6 text-base text-muted">
-          Your hour on the homepage:{" "}
+          Your {hours} homepage hour{hours === 1 ? "" : "s"} start{hours === 1 ? "s" : ""}:{" "}
           <span className="font-medium text-foreground">
             <LocalTime iso={new Date(row.starts_at).toISOString()} mode="when" />
           </span>

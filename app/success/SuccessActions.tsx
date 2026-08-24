@@ -54,7 +54,7 @@ export function SuccessActions({
         href={`https://x.com/intent/post?text=${encodeURIComponent(text)}`}
         target="_blank"
         rel="noopener"
-        className="rounded-full bg-accent px-6 py-2.5 text-sm font-medium text-white transition hover:opacity-90"
+        className="rounded-full bg-accent px-6 py-2.5 text-sm font-medium text-accent-ink transition hover:opacity-90"
       >
         Share on X
       </a>

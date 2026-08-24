@@ -1,6 +1,7 @@
 import { query } from "./db";
 import { SLUG_PATTERN } from "./slug";
 import { WALL_PAGE_SIZE, WALL_RANK_SAMPLE } from "./wall-rank";
+import { normalizeWallDomain } from "./wall-url";
 import type { Slot } from "./slots";
 
 export type WallEntry = {
@@ -9,6 +10,7 @@ export type WallEntry = {
   display_name: string | null;
   url: string | null;
   pitch: string | null;
+  image_url: string | null;
   slug: string | null;
   total_clicks: number;
   created_at: Date;
@@ -16,13 +18,30 @@ export type WallEntry = {
 
 export type WallEntryDetail = WallEntry & { rank: number; slots: Slot[] };
 
+export type TopClickedProduct = Pick<
+  WallEntry,
+  "id" | "display_name" | "url" | "pitch" | "image_url" | "total_clicks"
+> & {
+  /** The product's position on the permanent, amount-ranked Wall. */
+  rank: number;
+};
+
+export type LandingClickProof = {
+  topClickedProducts: TopClickedProduct[];
+  allTimeClicks: number;
+};
+
+export type WallEntryMatch = Pick<WallEntry, "id" | "amount_paid" | "display_name" | "slug"> & {
+  rank: number;
+};
+
 /**
  * total_clicks splits cleanly by where the click came from: the entry's slot holds the
  * clicks earned live on the homepage, and e.clicks holds the ones earned afterwards from
  * the Wall and the permanent page.
  */
 const ENTRY_COLUMNS = `
-  e.id::text AS id, e.amount_paid, e.display_name, e.url, e.pitch, e.slug, e.created_at,
+  e.id::text AS id, e.amount_paid, e.display_name, e.url, e.pitch, e.image_url, e.slug, e.created_at,
   (e.clicks + COALESCE(s.slot_clicks, 0))::int AS total_clicks
 `;
 
@@ -33,7 +52,8 @@ const ENTRY_CLICK_JOIN = `
 `;
 
 /** The Wall never resets and is ranked by money, so ties go to whoever paid first. */
-const RANK_ORDER = `ORDER BY e.amount_paid DESC, e.created_at ASC, e.id ASC`;
+const RANK_SORT = `e.amount_paid DESC, e.created_at ASC, e.id ASC`;
+const RANK_ORDER = `ORDER BY ${RANK_SORT}`;
 
 export async function getWallPage(
   limit = WALL_PAGE_SIZE,
@@ -51,6 +71,75 @@ export async function getWallCount(): Promise<number> {
     `SELECT count(*)::text AS count FROM wall_entries`,
   );
   return Number(rows[0]?.count ?? 0);
+}
+
+/**
+ * Landing-page social proof from the same cumulative click definition as the Wall.
+ *
+ * One Wall entry is one product. Its linked slots are placements for that product, so
+ * aggregating them before joining keeps multi-hour purchases deduped. The all-time total
+ * is returned by the same query as the top three so the header and proof cards cannot
+ * silently drift onto different definitions.
+ */
+export async function getLandingClickProof(): Promise<LandingClickProof> {
+  const rows = await query<{
+    top_products: TopClickedProduct[];
+    all_time_clicks: string;
+  }>(
+    `WITH slot_click_totals AS (
+       SELECT wall_entry_id, sum(clicks)::bigint AS clicks
+         FROM slots
+        WHERE wall_entry_id IS NOT NULL
+        GROUP BY wall_entry_id
+     ), ranked_entries AS (
+       SELECT e.*,
+              row_number() OVER (ORDER BY ${RANK_SORT})::int AS wall_rank
+         FROM wall_entries e
+     ), valid_products AS (
+       SELECT e.id, e.display_name, e.url, e.pitch, e.image_url, e.created_at,
+              e.wall_rank,
+              (e.clicks::bigint + COALESCE(s.clicks, 0)) AS total_clicks
+         FROM ranked_entries e
+         LEFT JOIN slot_click_totals s ON s.wall_entry_id = e.id
+        WHERE e.display_name IS NOT NULL
+          AND btrim(e.display_name) <> ''
+          AND e.url IS NOT NULL
+          AND btrim(e.url) <> ''
+     ), top_products AS (
+       SELECT *
+         FROM valid_products
+        WHERE total_clicks > 0
+        ORDER BY total_clicks DESC, wall_rank ASC, created_at ASC, id ASC
+        LIMIT 3
+     )
+     SELECT COALESCE(
+              (
+                SELECT jsonb_agg(
+                         jsonb_build_object(
+                           'id', p.id::text,
+                           'display_name', p.display_name,
+                           'url', p.url,
+                           'pitch', p.pitch,
+                           'image_url', p.image_url,
+                           'total_clicks', p.total_clicks,
+                           'rank', p.wall_rank
+                         )
+                         ORDER BY p.total_clicks DESC, p.wall_rank ASC,
+                                  p.created_at ASC, p.id ASC
+                       )
+                  FROM top_products p
+              ),
+              '[]'::jsonb
+            ) AS top_products,
+            COALESCE((SELECT sum(total_clicks) FROM valid_products), 0)::text
+              AS all_time_clicks`,
+  );
+
+  const row = rows[0];
+  return {
+    topClickedProducts: row?.top_products ?? [],
+    allTimeClicks: Number(row?.all_time_clicks ?? 0),
+  };
 }
 
 /**
@@ -76,6 +165,33 @@ export async function getWallTopAmount(): Promise<number | null> {
     `SELECT amount_paid FROM wall_entries ORDER BY amount_paid DESC LIMIT 1`,
   );
   return rows[0]?.amount_paid ?? null;
+}
+
+/**
+ * Finds the one permanent listing for a submitted product domain. This intentionally
+ * happens in application code rather than a URL-shaped SQL comparison: old rows may
+ * have any protocol, path or query string, but all of them still identify the same
+ * product by hostname.
+ */
+export async function findWallEntryByUrl(rawUrl: string): Promise<WallEntryMatch | null> {
+  const domain = normalizeWallDomain(rawUrl);
+  if (!domain) return null;
+
+  const rows = await query<Pick<WallEntry, "id" | "amount_paid" | "display_name" | "slug" | "url">>(
+    `SELECT e.id::text AS id, e.amount_paid, e.display_name, e.slug, e.url
+       FROM wall_entries e ${RANK_ORDER}`,
+  );
+  const index = rows.findIndex((entry) => normalizeWallDomain(entry.url) === domain);
+  if (index < 0) return null;
+
+  const entry = rows[index];
+  return {
+    id: entry.id,
+    amount_paid: entry.amount_paid,
+    display_name: entry.display_name,
+    slug: entry.slug,
+    rank: index + 1,
+  };
 }
 
 /**
@@ -143,6 +259,24 @@ export async function getBuyerTotalClicks(slotId: string): Promise<number> {
     [slotId],
   );
   return rows[0] ? Number(rows[0].total) : 0;
+}
+
+/**
+ * The current rollup for a batch of Wall entries, keyed by id. Same arithmetic as
+ * ENTRY_COLUMNS, so a card that refreshes its number after a click never disagrees with
+ * the number the next server render puts there.
+ */
+export async function getWallClickCounts(ids: string[]): Promise<Record<string, number>> {
+  const valid = ids.filter((id) => /^\d+$/.test(id));
+  if (valid.length === 0) return {};
+
+  const rows = await query<{ id: string; total_clicks: number }>(
+    `SELECT e.id::text AS id, (e.clicks + COALESCE(s.slot_clicks, 0))::int AS total_clicks
+       FROM wall_entries e ${ENTRY_CLICK_JOIN}
+      WHERE e.id = ANY($1::bigint[])`,
+    [valid],
+  );
+  return Object.fromEntries(rows.map((row) => [row.id, row.total_clicks]));
 }
 
 /** Where an entry's tracked link points. Used by the Wall and the permanent page. */

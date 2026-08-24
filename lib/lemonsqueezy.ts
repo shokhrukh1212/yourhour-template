@@ -5,8 +5,10 @@ const API = "https://api.lemonsqueezy.com/v1";
 
 export type CheckoutInput = {
   priceCents: number;
-  /** The hour this purchase was assigned. */
-  slotId: string;
+  /** The hour this purchase was assigned, absent for a Wall-only upgrade. */
+  slotId: string | null;
+  /** Consecutive homepage hours included in this checkout. */
+  hours: number;
   reservationId: string;
   expiresAt: Date;
   productName: string;
@@ -39,12 +41,14 @@ export async function createCheckout(input: CheckoutInput): Promise<string> {
           checkout_data: {
             custom: {
               slot_id: input.slotId,
+              // Lemon Squeezy requires every custom-data value to be a string.
+              hours: String(input.hours),
               reservation_id: input.reservationId,
             },
           },
           product_options: {
             name: `A permanent spot on The Wall at ${config.siteName}`,
-            description: input.productName,
+            description: `${input.productName} · ${input.hours} homepage hour${input.hours === 1 ? "" : "s"}`,
             // The buyer's slug is only decided inside the sale transaction, so the
             // redirect carries the reservation id instead and /success waits for the
             // webhook if it has not landed yet.

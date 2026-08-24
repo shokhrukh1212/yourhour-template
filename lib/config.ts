@@ -27,7 +27,21 @@ export const config = {
 
   vemetric: {
     token: process.env.VEMETRIC_TOKEN ?? "",
-    publicDashboardUrl: process.env.VEMETRIC_PUBLIC_DASHBOARD_URL ?? "",
+    // The header's Stats link. Public by design, so it falls back to the live dashboard
+    // rather than disappearing when the variable is missing from an environment.
+    publicDashboardUrl:
+      process.env.VEMETRIC_PUBLIC_DASHBOARD_URL ??
+      "https://app.vemetric.com/public/yourhour.com",
+  },
+
+  xPixel: {
+    // Not a secret -- it ships inside the browser tag.
+    id: process.env.NEXT_PUBLIC_X_PIXEL_ID ?? "",
+    // The Conversions API bearer. Server-only; never prefix with NEXT_PUBLIC_.
+    accessToken: process.env.X_PIXEL_ACCESS_TOKEN ?? "",
+    // Optional: the id of a specific conversion event created in X Ads Events Manager
+    // (e.g. a "Purchase" action). Omitted from calls when unset.
+    purchaseEventId: process.env.X_PIXEL_PURCHASE_EVENT_ID ?? "",
   },
 } as const;
 

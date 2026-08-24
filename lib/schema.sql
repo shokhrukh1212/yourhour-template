@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS wall_entries (
   amount_paid  integer NOT NULL,
   display_name text,
   url          text,
-  pitch        text CHECK (pitch IS NULL OR char_length(pitch) <= 120),
+  pitch        text CHECK (pitch IS NULL OR char_length(pitch) <= 180),
+  image_url    text,
   slug         text,
   -- Clicks arriving through /w/{id} (the Wall and the permanent page). Clicks earned
   -- during the buyer's own hour live on the slot, so an hour row never stops meaning
@@ -47,7 +48,8 @@ CREATE TABLE IF NOT EXISTS slots (
   status        slot_status NOT NULL DEFAULT 'open',
   display_name  text,
   url           text,
-  pitch         text CHECK (pitch IS NULL OR char_length(pitch) <= 120),
+  pitch         text CHECK (pitch IS NULL OR char_length(pitch) <= 180),
+  image_url     text,
   claim_number  bigint UNIQUE,
   price_paid    integer,
   clicks        integer NOT NULL DEFAULT 0,
@@ -87,16 +89,25 @@ SELECT setval(
 CREATE TABLE IF NOT EXISTS reservations (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   slot_id         bigint REFERENCES slots(id) ON DELETE CASCADE,
+  -- One order can own a consecutive run of homepage hours. slot_id is its first hour.
+  hours           integer NOT NULL DEFAULT 1 CHECK (hours IN (1, 2, 3, 6)),
+  -- The per-hour bid sets the permanent Wall rank; amount is the total checkout charge.
+  wall_amount     integer,
   amount          integer,
   expires_at      timestamptz NOT NULL,
   ls_checkout_url text,
   display_name    text,
   url             text,
   pitch           text,
+  image_url       text,
   status          text NOT NULL DEFAULT 'pending',  -- pending | completed | expired
   -- Set when the payment lands. This is how /success finds the sale it just paid for
   -- without guessing at a slug that is assigned inside the sale transaction.
   wall_entry_id   bigint REFERENCES wall_entries(id),
+  -- An upgrade changes this existing entry instead of creating a row or consuming an
+  -- hour. `amount` is the amount charged; `upgrade_amount` is its resulting Wall bid.
+  upgrade_entry_id bigint REFERENCES wall_entries(id),
+  upgrade_amount   integer,
   created_at      timestamptz NOT NULL DEFAULT now()
 );
 
@@ -160,13 +171,34 @@ CREATE TABLE IF NOT EXISTS counters (
 --
 -- Deleted: the stored board price and everything that moved it (20% sale bump, -10%
 -- decay, silent-hour counter, all-time-high ratchet, prime/quiet multipliers, $1
--- clearance), outbound email, the X API, gifting, standing hours, multi-hour blocks,
+-- clearance), outbound email, the X API, gifting, standing hours, the encore, and the
 -- the encore, and the separate Wall-only product.
 -- ===========================================================================
 
 ALTER TABLE reservations ADD COLUMN IF NOT EXISTS wall_entry_id bigint REFERENCES wall_entries(id);
 ALTER TABLE reservations ALTER COLUMN slot_id DROP NOT NULL;
 ALTER TABLE reservations ADD COLUMN IF NOT EXISTS amount integer;
+ALTER TABLE reservations ADD COLUMN IF NOT EXISTS hours integer NOT NULL DEFAULT 1;
+ALTER TABLE reservations ADD COLUMN IF NOT EXISTS wall_amount integer;
+ALTER TABLE reservations DROP CONSTRAINT IF EXISTS reservations_hours_check;
+ALTER TABLE reservations ADD CONSTRAINT reservations_hours_check
+  CHECK (hours IN (1, 2, 3, 6));
+ALTER TABLE reservations ADD COLUMN IF NOT EXISTS upgrade_entry_id bigint REFERENCES wall_entries(id);
+ALTER TABLE reservations ADD COLUMN IF NOT EXISTS upgrade_amount integer;
+ALTER TABLE wall_entries ADD COLUMN IF NOT EXISTS image_url text;
+ALTER TABLE slots ADD COLUMN IF NOT EXISTS image_url text;
+ALTER TABLE reservations ADD COLUMN IF NOT EXISTS image_url text;
+-- The Wall cards now allow a longer two-line description. Replace the old check on
+-- databases created before this limit changed; existing text is preserved.
+ALTER TABLE wall_entries DROP CONSTRAINT IF EXISTS wall_entries_pitch_check;
+ALTER TABLE wall_entries ADD CONSTRAINT wall_entries_pitch_check
+  CHECK (pitch IS NULL OR char_length(pitch) <= 180);
+ALTER TABLE slots DROP CONSTRAINT IF EXISTS slots_pitch_check;
+ALTER TABLE slots ADD CONSTRAINT slots_pitch_check
+  CHECK (pitch IS NULL OR char_length(pitch) <= 180);
+-- The X (Twitter) ad click id, when checkout started from an ad click. Used to match
+-- the sale back to the ad in the Conversions API -- never a raw IP (see lib/click.ts).
+ALTER TABLE reservations ADD COLUMN IF NOT EXISTS twclid text;
 -- Dynamic, because a plain UPDATE naming locked_price fails to PARSE once the column
 -- is gone -- the guard would never get the chance to run.
 DO $$ BEGIN
@@ -176,7 +208,8 @@ DO $$ BEGIN
   END IF;
 END $$;
 
--- A purchase is one hour again, so the block fan-out table has nothing to hold.
+-- The start slot and duration are sufficient to identify every consecutive hour in a
+-- purchase; the old fan-out table is still unnecessary.
 DROP TABLE IF EXISTS reservation_slots;
 
 ALTER TABLE reservations DROP COLUMN IF EXISTS locked_price;

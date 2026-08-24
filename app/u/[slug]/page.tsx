@@ -101,7 +101,7 @@ export default async function BuyerPage({ params }: Params) {
             href={`/w/${entry.id}`}
             target="_blank"
             rel="noopener"
-            className="mt-10 inline-flex items-center gap-2 rounded-full bg-accent px-8 py-3.5 font-medium text-white transition-transform hover:scale-[1.03]"
+            className="mt-10 inline-flex items-center gap-2 rounded-full bg-accent px-8 py-3.5 font-medium text-accent-ink transition-transform hover:scale-[1.03]"
           >
             Visit {entry.display_name} <span aria-hidden="true">→</span>
           </a>

@@ -33,7 +33,7 @@ export async function GET(request: Request) {
     orderId: `dev-${reservationId}`,
     reservationId,
     slotId: reservation.slot_id,
-    // The buyer's chosen amount -- that is what ranks them on the Wall.
+    // This is the total checkout charge; the stored per-hour bid sets Wall rank.
     pricePaid: reservation.amount ?? 0,
   });
 
