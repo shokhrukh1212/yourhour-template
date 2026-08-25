@@ -9,7 +9,7 @@ export function SuccessActions({ slug, siteUrl, clicks, priceCents, campaignId, 
   const [jumping, setJumping] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const link = `${siteUrl}/u/${slug}`;
-  const text = `Just bought ${clicks} guaranteed clicks on yourhour.lol for ${formatPrice(priceCents)}. ${formatClickRate()} a click. ${link}`;
+  const text = `Just put my product on yourhour.lol with a ${clicks}-visit balance for ${formatPrice(priceCents)}. ${formatClickRate()} a visit. ${link}`;
   async function copy() {
     try { await navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch {}
   }

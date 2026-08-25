@@ -12,7 +12,10 @@ type LemonWebhook = {
   data?: {
     id?: string;
     attributes?: {
+      subtotal?: number;
       total?: number;
+      currency?: string;
+      test_mode?: boolean;
       status?: string;
     };
   };
@@ -54,7 +57,10 @@ export async function POST(request: Request) {
     const outcome = await applyPaidOrder({
       orderId: String(orderId),
       intentId: payload.meta?.custom_data?.intent_id ?? null,
+      providerSubtotalCents: payload.data?.attributes?.subtotal ?? 0,
       providerTotalCents: payload.data?.attributes?.total ?? 0,
+      providerCurrency: payload.data?.attributes?.currency ?? "",
+      providerTestMode: Boolean(payload.data?.attributes?.test_mode),
     });
     return NextResponse.json(outcome);
   } catch (err) {

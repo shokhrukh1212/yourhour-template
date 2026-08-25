@@ -6,16 +6,20 @@ const POLL_MS = 5_000;
 
 export function CampaignClickProgress({
   campaignId,
-  initialDelivered,
-  paidClicks,
+  accountingStatus,
+  purchasedClicks,
+  initialGuaranteed,
+  initialTotal,
   initialBonusClicks,
 }: {
   campaignId: string;
-  initialDelivered: number;
-  paidClicks: number;
+  accountingStatus: "verified" | "manual_reconciled" | "legacy_total_only";
+  purchasedClicks: number | null;
+  initialGuaranteed: number | null;
+  initialTotal: number;
   initialBonusClicks: number;
 }) {
-  const [delivered, setDelivered] = useState(initialDelivered);
+  const [delivered, setDelivered] = useState(initialTotal);
   const [bonus, setBonus] = useState(initialBonusClicks);
 
   useEffect(() => {
@@ -43,10 +47,13 @@ export function CampaignClickProgress({
     };
   }, [campaignId]);
 
-  const guaranteed = Math.max(0, delivered - bonus);
-  const progress = Math.min(100, (guaranteed / Math.max(1, paidClicks)) * 100);
+  const guaranteed = initialGuaranteed === null ? null : Math.max(initialGuaranteed, delivered - bonus);
+  if (accountingStatus === "legacy_total_only" || purchasedClicks === null || guaranteed === null) {
+    return <div className="flex items-baseline justify-between gap-4"><span className="text-sm text-muted">Total clicks received</span><strong className="text-2xl tabular">{delivered.toLocaleString()}</strong></div>;
+  }
+  const progress = Math.min(100, (guaranteed / Math.max(1, purchasedClicks)) * 100);
   return <>
-    <div className="flex items-baseline justify-between gap-4"><span className="text-sm text-muted">Clicks delivered</span>{bonus > 0 ? <strong className="inline-flex items-baseline gap-1 tabular"><span className="text-2xl">{delivered.toLocaleString()}</span><span className="text-sm font-normal text-faint">clicks ({bonus.toLocaleString()} bonus)</span></strong> : <strong className="inline-flex items-baseline tabular"><span className="text-2xl">{delivered.toLocaleString()}</span><span className="text-sm font-normal text-faint">/{paidClicks.toLocaleString()}</span></strong>}</div>
+    <div className="flex flex-wrap items-baseline justify-between gap-4"><span className="text-sm text-muted">Delivery</span><strong className="text-sm font-normal leading-relaxed text-muted tabular">Purchased: <b className="text-foreground">{purchasedClicks}</b> · Delivered: <b className="text-foreground">{guaranteed}/{purchasedClicks}</b> · Bonus: <b className="text-violet">{bonus}</b> · Total: <b className="text-accent">{delivered}</b></strong></div>
     <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/[.08]" aria-label={`${Math.round(progress)}% delivered`}><div className="h-full rounded-full bg-accent transition-[width]" style={{ width: `${progress}%` }} /></div>
   </>;
 }

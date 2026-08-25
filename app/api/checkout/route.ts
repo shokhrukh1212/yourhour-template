@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { PoolClient } from "pg";
+import { dispatchVemetricEvent, insertFunnelEvent } from "@/lib/analytics";
 import { config, isLemonSqueezyConfigured } from "@/lib/config";
 import { lockBoard, withTransaction } from "@/lib/db";
 import { createCheckout } from "@/lib/lemonsqueezy";
@@ -16,6 +17,9 @@ import { hashIp } from "@/lib/click";
 import { jumpPrice, priceForClicks } from "@/lib/pricing";
 import { normalizeWallDomain } from "@/lib/wall-url";
 import { type CheckoutInput, validateCheckout } from "@/lib/validate";
+import { ensureVisitorId, VISITOR_COOKIE, visitorCookieOptions } from "@/lib/visitor-id";
+import { requestAnalyticsContext, type RequestAnalyticsContext } from "@/lib/request-context";
+import { canReservePurchase } from "@/lib/capacity";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +50,8 @@ export async function POST(request: Request) {
   const currentToken = ownerTokenFromRequest(request);
   const ownerToken = currentToken ?? newOwnerToken();
   const ownerHash = hashOwnerToken(ownerToken);
+  const visitor = ensureVisitorId(request);
+  const requestContext = requestAnalyticsContext(request);
 
   let metadata: Awaited<ReturnType<typeof fetchUrlMetadata>> | null = null;
   if (parsed.value.mode === "purchase") {
@@ -55,7 +61,7 @@ export async function POST(request: Request) {
 
   let reserved: ReservedIntent;
   try {
-    reserved = await reserveIntent(parsed.value, metadata, ownerHash, hashIp(request));
+    reserved = await reserveIntent(parsed.value, metadata, ownerHash, hashIp(request), visitor.id, requestContext);
   } catch (error) {
     const code = error instanceof Error ? error.message : "";
     if (code === "SOLD_OUT") {
@@ -95,9 +101,25 @@ export async function POST(request: Request) {
     }
   }
 
-  await withTransaction((client) =>
-    client.query(`UPDATE checkout_intents SET ls_checkout_url = $2 WHERE id = $1`, [reserved.id, checkoutUrl]).then(() => undefined),
-  );
+  const checkoutEventInserted = await withTransaction(async (client) => {
+    await client.query(`UPDATE checkout_intents SET ls_checkout_url = $2 WHERE id = $1`, [reserved.id, checkoutUrl]);
+    return insertFunnelEvent(client, {
+      name: "checkout_started",
+      idempotencyKey: reserved.id,
+      visitorId: visitor.id,
+      checkoutIntentId: reserved.id,
+      campaignId: reserved.campaignId,
+      eventData: {
+        mode: reserved.mode,
+        clickQuantity: reserved.clicks,
+        priceCents: reserved.priceCents,
+        currency: "USD",
+        ...(parsed.value.mode === "purchase" ? parsed.value.attribution : {}),
+        ...requestContext,
+      },
+    });
+  });
+  if (checkoutEventInserted) void dispatchVemetricEvent("checkout_started", reserved.id);
   const response = NextResponse.json({
     checkoutUrl,
     devMode: !isLemonSqueezyConfigured(),
@@ -106,6 +128,7 @@ export async function POST(request: Request) {
     priceCents: reserved.priceCents,
   });
   if (!currentToken) response.cookies.set(OWNER_COOKIE, ownerToken, ownerCookieOptions);
+  if (visitor.isNew) response.cookies.set(VISITOR_COOKIE, visitor.id, visitorCookieOptions);
   return response;
 }
 
@@ -114,6 +137,8 @@ async function reserveIntent(
   metadata: Awaited<ReturnType<typeof fetchUrlMetadata>> | null,
   ownerHash: string,
   purchaseIpHash: string,
+  visitorId: string,
+  requestContext: RequestAnalyticsContext,
 ): Promise<ReservedIntent> {
   return withTransaction(async (client) => {
     await lockBoard(client);
@@ -124,7 +149,7 @@ async function reserveIntent(
 
     if (input.mode === "purchase") {
       if (!metadata) throw new Error("INVALID_METADATA");
-      return reservePurchase(client, input, metadata, ownerHash, purchaseIpHash);
+      return reservePurchase(client, input, metadata, ownerHash, purchaseIpHash, visitorId, requestContext);
     }
 
     const rows = await client.query<{
@@ -180,6 +205,8 @@ async function reservePurchase(
   metadata: Awaited<ReturnType<typeof fetchUrlMetadata>>,
   ownerHash: string,
   purchaseIpHash: string,
+  visitorId: string,
+  requestContext: RequestAnalyticsContext,
 ): Promise<ReservedIntent> {
   const all = await client.query<{
     id: string;
@@ -187,32 +214,39 @@ async function reservePurchase(
     product_name: string;
     owner_token_hash: string | null;
     amount_paid_cents: number;
+    accounting_status: string;
   }>(
-    `SELECT id::text AS id, url, product_name, owner_token_hash, amount_paid_cents
+    `SELECT id::text AS id, url, product_name, owner_token_hash, amount_paid_cents, accounting_status
        FROM campaigns FOR UPDATE`,
   );
   const domain = normalizeWallDomain(input.url);
-  const existing = all.rows.find((row) => normalizeWallDomain(row.url) === domain) ?? null;
+  const historicalMatch = all.rows.find((row) => normalizeWallDomain(row.url) === domain) ?? null;
+  const existing = historicalMatch?.accounting_status === "legacy_total_only" ? null : historicalMatch;
   if (existing && !ownerHashesMatch(existing.owner_token_hash, ownerHash)) {
     throw new Error("NOT_OWNER");
   }
 
   const displayName = (metadata.scraped ? metadata.productName : input.name ?? metadata.productName).trim();
   const pitch = metadata.scraped ? metadata.pitch : input.pitch ?? metadata.pitch;
-  if (!existing && all.rows.some((row) => row.product_name.toLowerCase() === displayName.toLowerCase())) {
+  if (!existing && all.rows.some((row) =>
+    row.id !== historicalMatch?.id && row.product_name.toLowerCase() === displayName.toLowerCase()
+  )) {
     throw new Error("NAME_TAKEN");
   }
 
   const capacity = await client.query<{ max_clicks: number; outstanding: string; held: string }>(
     `SELECT sc.max_outstanding_clicks AS max_clicks,
-            COALESCE((SELECT sum(clicks_purchased - (clicks_delivered - bonus_clicks) - clicks_refunded)
-                        FROM campaigns WHERE status IN ('queued','live')), 0)::text AS outstanding,
+            COALESCE((SELECT sum(purchased_clicks - guaranteed_clicks_delivered - clicks_refunded)
+                        FROM campaigns
+                       WHERE status IN ('queued','live')
+                         AND purchased_clicks IS NOT NULL
+                         AND guaranteed_clicks_delivered IS NOT NULL), 0)::text AS outstanding,
             COALESCE((SELECT sum(clicks_delta) FROM checkout_intents
                         WHERE mode = 'purchase' AND status = 'pending' AND expires_at > now()), 0)::text AS held
        FROM site_config sc WHERE singleton = true`,
   );
   const supply = capacity.rows[0];
-  if (!supply || Number(supply.outstanding) + Number(supply.held) + input.clicks > supply.max_clicks) {
+  if (!supply || !canReservePurchase(supply.max_clicks, Number(supply.outstanding), Number(supply.held), input.clicks)) {
     throw new Error("SOLD_OUT");
   }
 
@@ -223,8 +257,8 @@ async function reservePurchase(
     `INSERT INTO checkout_intents
        (mode, campaign_id, clicks_delta, expected_amount_cents,
         display_name, url, pitch, icon_url, owner_token_hash, purchase_ip_hash,
-        twclid, expires_at)
-     VALUES ('purchase', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        visitor_id, twclid, attribution, expires_at)
+     VALUES ('purchase', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::uuid, $11, $12::jsonb, $13)
      RETURNING id::text AS id`,
     [
       existing?.id ?? null,
@@ -236,7 +270,9 @@ async function reservePurchase(
       metadata.imageUrl,
       ownerHash,
       purchaseIpHash,
+      visitorId,
       input.twclid,
+      JSON.stringify({ ...input.attribution, ...requestContext }),
       expiresAt,
     ],
   );

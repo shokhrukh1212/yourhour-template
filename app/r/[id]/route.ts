@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { trackServerEvent } from "@/lib/analytics";
 import { getCampaignById } from "@/lib/campaigns";
-import { hashIp } from "@/lib/click";
+import { hashIp, isObviousBot, requestUserAgent } from "@/lib/click";
 import { config } from "@/lib/config";
 import { recordCampaignClick } from "@/lib/delivery";
+import { hashOwnerToken, ownerTokenFromRequest } from "@/lib/ownership";
+import { ensureVisitorId, VISITOR_COOKIE, visitorCookieOptions } from "@/lib/visitor-id";
 
 export const dynamic = "force-dynamic";
 
@@ -17,20 +18,26 @@ export async function GET(
   const campaign = await getCampaignById(id).catch(() => null);
   if (!campaign?.url) return NextResponse.redirect(new URL("/", config.siteUrl));
 
+  const visitor = ensureVisitorId(request);
+  let destination = campaign.url;
   try {
     const bonusRequested = new URL(request.url).searchParams.get("bonus") === "1";
-    const outcome = await recordCampaignClick(id, hashIp(request), bonusRequested);
-    if (!outcome.url) return NextResponse.redirect(new URL("/", config.siteUrl));
-    void trackServerEvent("campaign_clicked", {
+    const ownerToken = ownerTokenFromRequest(request);
+    const outcome = await recordCampaignClick({
       campaignId: id,
-      counted: outcome.counted,
-      completed: outcome.completed,
-      bonus: outcome.bonus,
+      visitorId: visitor.id,
+      ipHash: hashIp(request),
+      userAgent: requestUserAgent(request),
+      bonusRequested,
+      obviousBot: isObviousBot(request),
+      ownerTokenHash: ownerToken ? hashOwnerToken(ownerToken) : null,
     });
-    return NextResponse.redirect(outcome.url, { status: 302 });
+    destination = outcome.url ?? new URL("/", config.siteUrl).toString();
   } catch (error) {
     console.error("campaign click tracking failed", error);
     // Counting is best-effort; a database problem must not trap a visitor on this site.
-    return NextResponse.redirect(campaign.url, { status: 302 });
   }
+  const response = NextResponse.redirect(destination, { status: 302 });
+  if (visitor.isNew) response.cookies.set(VISITOR_COOKIE, visitor.id, visitorCookieOptions);
+  return response;
 }

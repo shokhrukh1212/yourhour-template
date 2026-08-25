@@ -9,6 +9,7 @@
     "lint": "eslint",
     "migrate": "tsx --env-file=.env.local scripts/migrate.ts",
     "backup": "tsx --env-file=.env.local scripts/backup-json.ts",
+    "audit:accounting": "tsx --env-file=.env.local scripts/audit-accounting.ts",
     "seed:demo": "tsx --env-file=.env.local scripts/seed-demo.ts",
     "test": "node --import tsx --test lib/__tests__/*.test.ts",
     "reset": "tsx --env-file=.env.local scripts/reset-board.ts"

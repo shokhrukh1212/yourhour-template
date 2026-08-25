@@ -54,11 +54,14 @@ body {
 }
 
 /* The landing mock was composed with the Windows UI variable family. Scope this stack
-   to the homepage so the receipt, success, and buyer pages keep their existing type. */
+   to the homepage so the receipt, success, and buyer pages keep their existing type.
+   Geist is already self-hosted for the rest of the site and sits ahead of the generic
+   fallbacks: it keeps the hero's fixed-line headline on predictable metrics everywhere
+   instead of landing on whatever wide sans the platform happens to supply. */
 .landing-page {
   min-width: 0;
   overflow: clip;
-  font-family: "Segoe UI Variable", "Aptos", Inter, ui-sans-serif, system-ui, sans-serif;
+  font-family: "Segoe UI Variable", "Aptos", Inter, var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
 }
 
 .landing-page ::selection {
@@ -67,6 +70,11 @@ body {
 }
 
 .landing-shell {
+  width: min(1280px, calc(100% - 40px));
+  margin-inline: auto;
+}
+
+.site-header-shell {
   width: min(1280px, calc(100% - 40px));
   margin-inline: auto;
 }
@@ -118,8 +126,17 @@ body {
   margin: 0;
 }
 
+.buyer-review {
+  padding-bottom: max(20px, env(safe-area-inset-bottom));
+  overscroll-behavior: contain;
+}
+
 @media (min-width: 641px) and (max-width: 900px) {
   .landing-shell {
+    width: min(calc(100% - 28px), 720px);
+  }
+
+  .site-header-shell {
     width: min(calc(100% - 28px), 720px);
   }
 }
@@ -129,12 +146,26 @@ body {
     width: calc(100% - 28px);
   }
 
+  .site-header-shell {
+    width: calc(100% - 20px);
+  }
+
   .landing-claim-panel {
     position: fixed !important;
     inset: 54px 0 auto !important;
     width: 100% !important;
     max-height: calc(100svh - 54px);
     border-radius: 0 0 22px 22px !important;
+  }
+
+  .buyer-review {
+    max-height: calc(100dvh - 12px);
+  }
+}
+
+@media (max-width: 359px) {
+  .site-header-shell {
+    width: calc(100% - 8px);
   }
 }
 

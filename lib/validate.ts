@@ -1,4 +1,4 @@
-import { MAX_CLICKS, MIN_CLICKS } from "./pricing";
+import { CLICK_STEP, MAX_CLICKS, MIN_CLICKS } from "./pricing";
 
 export const PITCH_MAX = 180;
 export const DISPLAY_NAME_MAX = 60;
@@ -15,6 +15,16 @@ export type PurchaseInput = {
   name: string | null;
   pitch: string | null;
   twclid: string | null;
+  attribution: PurchaseAttribution;
+};
+
+export type PurchaseAttribution = {
+  utmSource: string | null;
+  utmMedium: string | null;
+  utmCampaign: string | null;
+  utmContent: string | null;
+  utmTerm: string | null;
+  referrer: string | null;
 };
 
 export type JumpInput = { mode: "jump"; campaignId: string };
@@ -72,6 +82,26 @@ function sanitizeTwclid(raw: unknown): string | null {
   return /^[A-Za-z0-9._-]{1,128}$/.test(text) ? text : null;
 }
 
+function attributionValue(raw: unknown, max = 200): string | null {
+  const text = String(raw ?? "").trim();
+  if (!text) return null;
+  return text.slice(0, max);
+}
+
+function sanitizeAttribution(raw: unknown): PurchaseAttribution {
+  const value = typeof raw === "object" && raw !== null
+    ? raw as Record<string, unknown>
+    : {};
+  return {
+    utmSource: attributionValue(value.utmSource),
+    utmMedium: attributionValue(value.utmMedium),
+    utmCampaign: attributionValue(value.utmCampaign),
+    utmContent: attributionValue(value.utmContent),
+    utmTerm: attributionValue(value.utmTerm),
+    referrer: attributionValue(value.referrer, 500),
+  };
+}
+
 function clampText(raw: unknown, max: number): string | null {
   const text = String(raw ?? "").trim().replace(/\s+/g, " ");
   if (!text) return null;
@@ -97,6 +127,9 @@ export function validateCheckout(body: unknown): ValidationResult {
   if (clicks === null) return { ok: false, error: "Enter a whole number of clicks." };
   if (clicks < MIN_CLICKS) return { ok: false, error: `Minimum ${MIN_CLICKS} clicks.` };
   if (clicks > MAX_CLICKS) return { ok: false, error: `Maximum ${MAX_CLICKS} clicks per order.` };
+  if (clicks % CLICK_STEP !== 0) {
+    return { ok: false, error: `Choose clicks in increments of ${CLICK_STEP}.` };
+  }
   const urlCheck = checkProductUrl(String(raw.url ?? ""));
   if (!urlCheck.ok) return { ok: false, error: urlCheck.error };
   return {
@@ -108,6 +141,7 @@ export function validateCheckout(body: unknown): ValidationResult {
       name: clampText(raw.name, DISPLAY_NAME_MAX),
       pitch: clampText(raw.pitch, PITCH_MAX),
       twclid: sanitizeTwclid(raw.twclid),
+      attribution: sanitizeAttribution(raw.attribution),
     },
   };
 }

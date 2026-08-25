@@ -57,7 +57,7 @@ export async function GET(request: Request) {
 
   return NextResponse.json(
     {
-      ready: Boolean(row.slug),
+      ready: row.status === "completed" && Boolean(row.slug),
       status: row.status,
       mode: row.mode,
       slug: row.slug,

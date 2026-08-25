@@ -10,11 +10,12 @@ export function Footer() {
           yourhour<span className="text-faint">.lol</span>
         </span>
       </Link>
-      <p className="hidden lg:block">One product owns the homepage until its clicks are delivered.</p>
+      <p className="hidden lg:block">One featured product until every purchased click is delivered.</p>
       <nav className="flex flex-wrap gap-5 sm:justify-end">
         <a href="#wall" className="hover:text-foreground">
           Leaderboard
         </a>
+        <Link href="/get-clicks" className="hover:text-foreground">Get clicks</Link>
         <Link href="/rules" className="hover:text-foreground">
           Rules
         </Link>

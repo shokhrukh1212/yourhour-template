@@ -21,6 +21,13 @@ type IntentRow = {
   display_name: string | null;
   slug: string | null;
   ls_order_id: string | null;
+  provider_total_cents: number | null;
+  provider_currency: string | null;
+  delivery_deadline: Date | null;
+  guaranteed_clicks_delivered: number;
+  guaranteed_clicks_refunded: number;
+  refund_target_cents: number;
+  refunded_cents: number;
 };
 
 export default async function Success({ searchParams }: { searchParams: Promise<{ r?: string }> }) {
@@ -29,7 +36,10 @@ export default async function Success({ searchParams }: { searchParams: Promise<
   const rows = await query<IntentRow>(
     `SELECT i.status, i.mode, i.clicks_delta, i.expected_amount_cents,
             i.owner_token_hash, i.campaign_id::text AS campaign_id,
-            i.display_name, i.ls_order_id, c.slug
+            i.display_name, i.ls_order_id, i.provider_total_cents,
+            i.provider_currency, i.delivery_deadline,
+            i.guaranteed_clicks_delivered, i.guaranteed_clicks_refunded,
+            i.refund_target_cents, i.refunded_cents, c.slug
        FROM checkout_intents i LEFT JOIN campaigns c ON c.id = i.campaign_id
       WHERE i.id = $1`,
     [intentId],
@@ -38,7 +48,7 @@ export default async function Success({ searchParams }: { searchParams: Promise<
   if (!row) notFound();
   const ownerHash = await ownerHashFromCookies();
   if (!ownerHashesMatch(row.owner_token_hash, ownerHash)) notFound();
-  if (!row.slug || !row.campaign_id) {
+  if (row.status !== "completed" || !row.ls_order_id || !row.slug || !row.campaign_id) {
     return <Shell><WaitingForPayment intentId={intentId} name={row.display_name ?? "your product"} /></Shell>;
   }
 
@@ -58,12 +68,13 @@ export default async function Success({ searchParams }: { searchParams: Promise<
 
   return (
     <Shell>
-      <XPurchaseEvent eventId={config.xPixel.purchaseEventId} conversionId={row.ls_order_id ?? intentId} amountCents={row.expected_amount_cents} />
+      {row.mode === "purchase" ? <XPurchaseEvent eventId={config.xPixel.purchaseEventId} conversionId={row.ls_order_id} amountCents={row.provider_total_cents ?? row.expected_amount_cents} currency={row.provider_currency ?? "USD"} /> : null}
       <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">You&apos;re in.</h1>
       {row.mode === "purchase" ? (
         <>
           <p className="mt-6 text-lg"><span className="font-semibold tabular">{row.clicks_delta} clicks</span><span className="mx-2 text-faint">·</span><span className="font-semibold tabular">{formatPrice(row.expected_amount_cents)}</span>{queuePosition ? <><span className="mx-2 text-faint">·</span><span className="font-semibold tabular text-accent">#{queuePosition} in queue</span></> : null}</p>
           <p className="mt-4 text-base text-muted">Your clicks start {startsIn === "now" ? "now" : startsIn === "—" ? "after the campaigns ahead of you complete" : `in ${startsIn}`}.</p>
+          {row.delivery_deadline ? <p className="mt-3 text-sm text-muted">Delivery deadline: <time dateTime={row.delivery_deadline.toISOString()} className="font-semibold text-foreground">{new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(row.delivery_deadline)} UTC</time>. Delivered {row.guaranteed_clicks_delivered}/{row.clicks_delta}.{row.guaranteed_clicks_refunded > 0 ? ` ${row.refunded_cents >= row.refund_target_cents ? "Refunded" : "Refund processing for"} ${row.guaranteed_clicks_refunded} clicks.` : ""}</p> : null}
         </>
       ) : <p className="mt-6 text-lg">{formatPrice(row.expected_amount_cents)} moved your campaign to the front of the queue.</p>}
       <p className="mt-6 text-base text-muted">Your page: <Link href={`/u/${campaign.slug}`} className="font-medium text-accent hover:underline">{pageUrl}</Link></p>

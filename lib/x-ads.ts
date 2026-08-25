@@ -17,9 +17,9 @@ type XConversionInput = {
  * lib/click.ts) for buyers, so organic sales simply have nothing to attribute.
  * Always fire-and-forget: ad tracking must never break a paid flow.
  */
-export async function trackXConversion(input: XConversionInput): Promise<void> {
+export async function trackXConversion(input: XConversionInput): Promise<"sent" | "skipped" | "failed"> {
   const { id: pixelId, accessToken, purchaseEventId } = config.xPixel;
-  if (!pixelId || !accessToken || !input.twclid) return;
+  if (!pixelId || !accessToken || !input.twclid) return "skipped";
 
   try {
     const res = await fetch(`https://ads-api.x.com/12/measurement/conversions/${pixelId}`, {
@@ -44,8 +44,11 @@ export async function trackXConversion(input: XConversionInput): Promise<void> {
     });
     if (!res.ok) {
       console.error("x conversion failed", res.status, await res.text());
+      return "failed";
     }
+    return "sent";
   } catch (err) {
     console.error("x conversion failed", err);
+    return "failed";
   }
 }

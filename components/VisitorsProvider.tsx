@@ -44,6 +44,8 @@ export function VisitorsProvider({
   return <VisitorsContext.Provider value={visitors}>{children}</VisitorsContext.Provider>;
 }
 
-export function useVisitors(fallback = 0): number {
-  return useContext(VisitorsContext) ?? fallback;
+export function useVisitors(): number {
+  const value = useContext(VisitorsContext);
+  if (value === null) throw new Error("useVisitors must be used inside VisitorsProvider");
+  return value;
 }

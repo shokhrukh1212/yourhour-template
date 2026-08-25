@@ -11,7 +11,7 @@ export async function GET(request: Request) {
     .slice(0, 50);
   const rows = await query<{
     delivered_total: string;
-    delivered_today: string;
+    delivered_last_24h: string;
     waiting: number;
     live_id: string | null;
     live_slug: string | null;
@@ -26,24 +26,28 @@ export async function GET(request: Request) {
     bonus_clicks: Record<string, number>;
   }>(
     `WITH summary AS (
-       SELECT COALESCE(sum(clicks_delivered), 0)::text AS delivered_total,
+       SELECT COALESCE(sum(total_clicks_delivered), 0)::text AS delivered_total,
               (SELECT count(*)::text FROM campaign_clicks
-                WHERE created_at >= date_trunc('day', now())) AS delivered_today,
+                WHERE created_at >= now() - interval '24 hours') AS delivered_last_24h,
               count(*) FILTER (WHERE status = 'queued')::int AS waiting
          FROM campaigns
     ), paid_live AS (
        SELECT id::text, slug, product_name, pitch, icon_url,
-              clicks_purchased, clicks_delivered, bonus_clicks, false AS is_bonus
+              purchased_clicks AS clicks_purchased,
+              total_clicks_delivered AS clicks_delivered,
+              bonus_clicks_delivered AS bonus_clicks, false AS is_bonus
          FROM campaigns WHERE status = 'live' LIMIT 1
     ), bonus AS (
        SELECT id::text, slug, product_name, pitch, icon_url,
-              clicks_purchased, clicks_delivered, bonus_clicks, true AS is_bonus
+              purchased_clicks AS clicks_purchased,
+              total_clicks_delivered AS clicks_delivered,
+              bonus_clicks_delivered AS bonus_clicks, true AS is_bonus
          FROM campaigns
         WHERE status = 'delivered'
           AND clicks_purchased > 0
-          AND bonus_clicks < COALESCE(bonus_click_cap, floor(clicks_purchased * 0.5)::int)
+          AND bonus_round_clicks_delivered < COALESCE(bonus_click_cap, floor(clicks_purchased * 0.5)::int)
           AND NOT EXISTS (SELECT 1 FROM campaigns WHERE status IN ('live','queued'))
-        ORDER BY clicks_delivered DESC, amount_paid_cents DESC, created_at ASC, id ASC
+        ORDER BY total_clicks_delivered DESC, amount_paid_cents DESC, created_at ASC, id ASC
         LIMIT 1
     ), featured AS (
        SELECT * FROM paid_live
@@ -51,11 +55,11 @@ export async function GET(request: Request) {
        SELECT * FROM bonus
        LIMIT 1
     ), requested AS (
-       SELECT COALESCE(jsonb_object_agg(id::text, clicks_delivered), '{}'::jsonb) AS clicks,
-              COALESCE(jsonb_object_agg(id::text, bonus_clicks), '{}'::jsonb) AS bonus_clicks
+       SELECT COALESCE(jsonb_object_agg(id::text, total_clicks_delivered), '{}'::jsonb) AS clicks,
+              COALESCE(jsonb_object_agg(id::text, bonus_clicks_delivered), '{}'::jsonb) AS bonus_clicks
          FROM campaigns WHERE id = ANY($1::bigint[])
      )
-     SELECT summary.delivered_total, summary.delivered_today, summary.waiting,
+     SELECT summary.delivered_total, summary.delivered_last_24h, summary.waiting,
             featured.id AS live_id, featured.slug AS live_slug,
             featured.product_name AS live_product_name, featured.pitch AS live_pitch,
             featured.icon_url AS live_icon_url,
@@ -85,7 +89,7 @@ export async function GET(request: Request) {
         : null,
       waiting: snapshot?.waiting ?? 0,
       deliveredTotal: Number(snapshot?.delivered_total ?? 0),
-      deliveredToday: Number(snapshot?.delivered_today ?? 0),
+      deliveredLast24h: Number(snapshot?.delivered_last_24h ?? 0),
       clicks: snapshot?.clicks ?? {},
       bonusClicks: snapshot?.bonus_clicks ?? {},
     },

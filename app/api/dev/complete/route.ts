@@ -23,7 +23,10 @@ export async function GET(request: Request) {
   const outcome = await applyPaidOrder({
     orderId: `dev-${intentId}`,
     intentId,
+    providerSubtotalCents: rows[0].expected_amount_cents,
     providerTotalCents: rows[0].expected_amount_cents,
+    providerCurrency: "USD",
+    providerTestMode: true,
   });
   if (outcome.status === "applied" || outcome.status === "duplicate") {
     return NextResponse.redirect(new URL(`/success?r=${intentId}`, request.url));

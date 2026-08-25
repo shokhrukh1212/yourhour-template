@@ -1,8 +1,7 @@
-import { ArrowIcon } from "@/components/ArrowIcon";
 import { ProductLogo } from "@/components/ProductLogo";
 import { ProofClickCount } from "@/components/ProofClickCount";
+import { TrackedVisitLink } from "@/components/TrackedVisitLink";
 import { formatDeliveryDuration, type CampaignProof } from "@/lib/campaigns";
-import { paidClicksForDisplay } from "@/lib/pricing";
 
 export function TopClickedProducts({ products }: { products: CampaignProof[] }) {
   if (!products.length) return null;
@@ -15,7 +14,7 @@ export function TopClickedProducts({ products }: { products: CampaignProof[] }) 
             Clicks we&apos;ve actually sent
           </h2>
         </div>
-        <p className="max-w-md leading-relaxed text-muted">Real products and the outbound clicks they received. Every one of these was paid for and delivered.</p>
+        <p className="max-w-md leading-relaxed text-muted">Real products and the outbound clicks YourHour recorded. Verified purchases show paid and bonus delivery separately.</p>
       </div>
       <div role="region" aria-label="Delivered campaigns" tabIndex={0} className="landing-proof-scroll grid snap-x snap-mandatory auto-cols-[85vw] grid-flow-col gap-3.5 overflow-x-auto pb-2 pr-[15%] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-violet md:auto-cols-auto md:grid-flow-row md:grid-cols-2 md:overflow-visible md:pb-0 md:pr-0 lg:grid-cols-3">
         {products.map((product, index) => <ProofCard key={product.id} product={product} position={index + 1} />)}
@@ -26,7 +25,6 @@ export function TopClickedProducts({ products }: { products: CampaignProof[] }) 
 
 function ProofCard({ product, position }: { product: CampaignProof; position: number }) {
   const duration = formatDeliveryDuration(product.started_at, product.delivered_at);
-  const paidClicks = paidClicksForDisplay(product);
   return (
     <article className="flex min-h-[230px] min-w-0 snap-start flex-col rounded-[22px] border border-border bg-surface p-6">
       <div className="flex items-center justify-between gap-4 text-xs font-extrabold tabular">
@@ -41,8 +39,8 @@ function ProofCard({ product, position }: { product: CampaignProof; position: nu
         </div>
       </div>
       <div className="mt-auto flex items-end justify-between gap-5 pt-6">
-        <ProofClickCount campaignId={product.id} initialDelivered={product.clicks_delivered} paidClicks={paidClicks} />
-        <a href={`/r/${product.id}`} target="_blank" rel="noopener" aria-label={`Visit ${product.product_name} (opens in a new tab)`} className="inline-flex shrink-0 items-center gap-1.5 rounded-md text-xs font-bold text-muted transition hover:text-accent focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent">Visit <ArrowIcon className="h-3.5 w-3.5" /></a>
+        <ProofClickCount campaignId={product.id} accountingStatus={product.accounting_status} purchasedClicks={product.purchased_clicks} initialGuaranteed={product.guaranteed_clicks_delivered} initialBonus={product.bonus_clicks_delivered} initialTotal={product.total_clicks_delivered} />
+        <TrackedVisitLink campaignId={product.id} productName={product.product_name} className="inline-flex shrink-0 items-center gap-1.5 rounded-md text-xs font-bold text-muted transition hover:text-accent focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent" />
       </div>
     </article>
   );

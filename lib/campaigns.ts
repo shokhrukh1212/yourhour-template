@@ -4,6 +4,7 @@ import { normalizeWallDomain } from "./wall-url";
 import { WALL_PAGE_SIZE, WALL_RANK_SAMPLE } from "./wall-rank";
 
 export type CampaignStatus = "queued" | "live" | "delivered";
+export type AccountingStatus = "verified" | "manual_reconciled" | "legacy_total_only";
 
 export type Campaign = {
   id: string;
@@ -15,6 +16,13 @@ export type Campaign = {
   clicks_purchased: number;
   clicks_delivered: number;
   bonus_clicks: number;
+  accounting_status: AccountingStatus;
+  purchased_clicks: number | null;
+  guaranteed_clicks_delivered: number | null;
+  bonus_clicks_delivered: number;
+  historical_clicks_delivered: number;
+  bonus_round_clicks_delivered: number;
+  total_clicks_delivered: number;
   bonus_click_cap: number | null;
   clicks_refunded: number;
   amount_paid_cents: number;
@@ -40,8 +48,13 @@ export type CampaignProof = Pick<
   | "pitch"
   | "icon_url"
   | "clicks_purchased"
-  | "clicks_delivered"
-  | "bonus_clicks"
+  | "accounting_status"
+  | "purchased_clicks"
+  | "guaranteed_clicks_delivered"
+  | "bonus_clicks_delivered"
+  | "historical_clicks_delivered"
+  | "bonus_round_clicks_delivered"
+  | "total_clicks_delivered"
   | "amount_paid_cents"
   | "status"
   | "started_at"
@@ -57,6 +70,9 @@ export function stripCampaignOwner(campaign: Campaign): Omit<Campaign, "owner_to
 const COLUMNS = `
   id::text AS id, slug, url, product_name, pitch, icon_url,
   clicks_purchased, clicks_delivered, bonus_clicks, bonus_click_cap, clicks_refunded,
+  accounting_status, purchased_clicks, guaranteed_clicks_delivered,
+  bonus_clicks_delivered, historical_clicks_delivered,
+  bonus_round_clicks_delivered, total_clicks_delivered,
   amount_paid_cents, priority_cents, status::text AS status,
   owner_token_hash, created_at, started_at, delivered_at
 `;
@@ -74,10 +90,10 @@ export async function getBonusCampaign(): Promise<Campaign | null> {
     `SELECT ${COLUMNS}
        FROM campaigns
       WHERE status = 'delivered'
-        AND clicks_purchased > 0
-        AND bonus_clicks < COALESCE(bonus_click_cap, floor(clicks_purchased * 0.5)::int)
+        AND (bonus_click_cap IS NOT NULL OR COALESCE(purchased_clicks, 0) > 0)
+        AND bonus_round_clicks_delivered < COALESCE(bonus_click_cap, floor(COALESCE(purchased_clicks, 0) * 0.5)::int)
         AND NOT EXISTS (SELECT 1 FROM campaigns WHERE status IN ('live','queued'))
-      ORDER BY clicks_delivered DESC, amount_paid_cents DESC, created_at ASC, id ASC
+      ORDER BY total_clicks_delivered DESC, amount_paid_cents DESC, created_at ASC, id ASC
       LIMIT 1`,
   );
   return rows[0] ?? null;
@@ -188,29 +204,31 @@ export async function getDeliveredProof(): Promise<CampaignProof[]> {
          FROM campaigns c
      )
      SELECT id::text AS id, slug, url, product_name, pitch, icon_url,
-            clicks_purchased, clicks_delivered, bonus_clicks, amount_paid_cents,
+            clicks_purchased, accounting_status, purchased_clicks,
+            guaranteed_clicks_delivered, bonus_clicks_delivered,
+            historical_clicks_delivered, bonus_round_clicks_delivered,
+            total_clicks_delivered, amount_paid_cents,
             status::text AS status, started_at, delivered_at, rank
        FROM ranked
       WHERE status = 'delivered'
-        AND clicks_purchased > 0
-        AND clicks_delivered - bonus_clicks >= clicks_purchased
-      ORDER BY clicks_delivered DESC, rank ASC, created_at ASC, id ASC
+        AND total_clicks_delivered > 0
+      ORDER BY total_clicks_delivered DESC, rank ASC, created_at ASC, id ASC
       LIMIT 3`,
   );
 }
 
 export async function getDeliveredTotal(): Promise<number> {
   const rows = await query<{ total: string }>(
-    `SELECT COALESCE(sum(clicks_delivered), 0)::text AS total FROM campaigns`,
+    `SELECT COALESCE(sum(total_clicks_delivered), 0)::text AS total FROM campaigns`,
   );
   return Number(rows[0]?.total ?? 0);
 }
 
-export async function getDeliveredToday(): Promise<number> {
+export async function getDeliveredLast24h(): Promise<number> {
   const rows = await query<{ total: string }>(
     `SELECT count(*)::text AS total
        FROM campaign_clicks
-      WHERE created_at >= date_trunc('day', now())`,
+      WHERE created_at >= now() - interval '24 hours'`,
   );
   return Number(rows[0]?.total ?? 0);
 }
@@ -230,12 +248,14 @@ export async function getSiteCapacity(): Promise<{
 }> {
   const rows = await query<{ max_outstanding: number; outstanding: string }>(
     `SELECT sc.max_outstanding_clicks AS max_outstanding,
-            COALESCE((SELECT sum(clicks_purchased - (clicks_delivered - bonus_clicks) - clicks_refunded)
-                        FROM campaigns WHERE status IN ('queued','live')), 0)::text AS outstanding
+            COALESCE((SELECT sum(purchased_clicks - guaranteed_clicks_delivered - clicks_refunded)
+                        FROM campaigns
+                       WHERE status IN ('queued','live')
+                         AND accounting_status IN ('verified','manual_reconciled')), 0)::text AS outstanding
        FROM site_config sc WHERE singleton = true`,
   );
   return {
-    maxOutstanding: rows[0]?.max_outstanding ?? 150,
+    maxOutstanding: rows[0]?.max_outstanding ?? 250,
     outstanding: Number(rows[0]?.outstanding ?? 0),
   };
 }
@@ -266,8 +286,9 @@ async function getRank(id: string, amount: number, createdAt: Date): Promise<num
   return Number(rows[0]?.ahead ?? 0) + 1;
 }
 
-export function remainingClicks(campaign: Pick<Campaign, "clicks_purchased" | "clicks_delivered" | "bonus_clicks" | "clicks_refunded">): number {
-  return Math.max(0, campaign.clicks_purchased - (campaign.clicks_delivered - campaign.bonus_clicks) - campaign.clicks_refunded);
+export function remainingClicks(campaign: Pick<Campaign, "purchased_clicks" | "guaranteed_clicks_delivered" | "clicks_refunded">): number {
+  if (campaign.purchased_clicks === null || campaign.guaranteed_clicks_delivered === null) return 0;
+  return Math.max(0, campaign.purchased_clicks - campaign.guaranteed_clicks_delivered - campaign.clicks_refunded);
 }
 
 export function estimateQueue(queue: Campaign[], perHour: number): Record<string, { start: number | null; complete: number | null }> {

@@ -19,6 +19,16 @@ CREATE TABLE IF NOT EXISTS campaigns (
   clicks_purchased      integer NOT NULL CHECK (clicks_purchased >= 0),
   clicks_delivered      integer NOT NULL DEFAULT 0 CHECK (clicks_delivered >= 0),
   bonus_clicks          integer NOT NULL DEFAULT 0 CHECK (bonus_clicks >= 0),
+  accounting_status     text NOT NULL DEFAULT 'verified'
+                          CHECK (accounting_status IN ('verified','manual_reconciled','legacy_total_only')),
+  purchased_clicks      integer CHECK (purchased_clicks IS NULL OR purchased_clicks >= 0),
+  guaranteed_clicks_delivered integer CHECK (guaranteed_clicks_delivered IS NULL OR guaranteed_clicks_delivered >= 0),
+  bonus_clicks_delivered integer NOT NULL DEFAULT 0 CHECK (bonus_clicks_delivered >= 0),
+  historical_clicks_delivered integer NOT NULL DEFAULT 0 CHECK (historical_clicks_delivered >= 0),
+  bonus_round_clicks_delivered integer NOT NULL DEFAULT 0 CHECK (bonus_round_clicks_delivered >= 0),
+  total_clicks_delivered integer GENERATED ALWAYS AS (
+    COALESCE(guaranteed_clicks_delivered, 0) + bonus_clicks_delivered + historical_clicks_delivered
+  ) STORED,
   bonus_click_cap       integer CHECK (bonus_click_cap IS NULL OR bonus_click_cap >= 0),
   clicks_refunded       integer NOT NULL DEFAULT 0 CHECK (clicks_refunded >= 0),
   amount_paid_cents     integer NOT NULL CHECK (amount_paid_cents >= 0),
@@ -36,6 +46,94 @@ CREATE TABLE IF NOT EXISTS campaigns (
 
 ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS bonus_clicks integer NOT NULL DEFAULT 0;
 ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS bonus_click_cap integer;
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS accounting_status text NOT NULL DEFAULT 'verified';
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS purchased_clicks integer;
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS guaranteed_clicks_delivered integer;
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS bonus_clicks_delivered integer NOT NULL DEFAULT 0;
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS historical_clicks_delivered integer NOT NULL DEFAULT 0;
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS bonus_round_clicks_delivered integer NOT NULL DEFAULT 0;
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS total_clicks_delivered integer GENERATED ALWAYS AS (
+  COALESCE(guaranteed_clicks_delivered, 0) + bonus_clicks_delivered + historical_clicks_delivered
+) STORED;
+
+CREATE TABLE IF NOT EXISTS campaign_accounting_audits (
+  id             bigserial PRIMARY KEY,
+  campaign_id    bigint NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  reason_code    text NOT NULL,
+  reason         text NOT NULL,
+  provenance     text NOT NULL,
+  before_values  jsonb NOT NULL,
+  after_values   jsonb NOT NULL,
+  corrected_at   timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (campaign_id, reason_code)
+);
+
+-- The time-based product stored traffic earned, not clicks purchased. Preserve the
+-- verifiable total and any bonus-round clicks recorded after the conversion, but do
+-- not manufacture a guaranteed-purchase quantity from the amount paid.
+UPDATE campaigns
+   SET accounting_status = 'legacy_total_only',
+       purchased_clicks = NULL,
+       guaranteed_clicks_delivered = NULL,
+       historical_clicks_delivered = GREATEST(0, clicks_delivered - bonus_clicks),
+       bonus_clicks_delivered = bonus_clicks,
+       bonus_round_clicks_delivered = bonus_clicks
+ WHERE status = 'delivered'
+   AND started_at IS NULL
+   AND delivered_at IS NULL
+   -- Screenwar has a dedicated audited correction below. Reclassifying it here on a
+   -- rerun would temporarily put 79 historical bonus clicks against its 33-click
+   -- operational bonus cap and fail before the correction can be applied.
+   AND slug <> 'screenwar';
+
+-- All non-legacy campaigns were created by the guaranteed-click checkout and can be
+-- mapped without inference.
+UPDATE campaigns
+   SET accounting_status = 'verified',
+       purchased_clicks = clicks_purchased,
+       guaranteed_clicks_delivered = GREATEST(0, clicks_delivered - bonus_clicks),
+       historical_clicks_delivered = 0,
+       bonus_clicks_delivered = bonus_clicks,
+       bonus_round_clicks_delivered = bonus_clicks
+ WHERE NOT (status = 'delivered' AND started_at IS NULL AND delivered_at IS NULL)
+   AND (purchased_clicks IS NULL OR guaranteed_clicks_delivered IS NULL);
+
+-- Screenwar is the one legacy record whose split was confirmed by the product owner.
+-- Record the exact before/after snapshot before applying the idempotent correction.
+INSERT INTO campaign_accounting_audits
+  (campaign_id, reason_code, reason, provenance, before_values, after_values)
+SELECT id,
+       'screenwar-launch-customer-2026-08-24',
+       'Correct the launch customer guarantee while preserving the confirmed total.',
+       'Owner-confirmed launch customer correction dated 2026-08-24',
+       jsonb_build_object(
+         'clicksPurchased', clicks_purchased,
+         'clicksDelivered', clicks_delivered,
+         'bonusClicks', bonus_clicks,
+         'amountPaidCents', amount_paid_cents
+       ),
+       jsonb_build_object(
+         'purchasedClicks', 25,
+         'guaranteedClicksDelivered', 25,
+         'bonusClicksDelivered', 74,
+         'totalClicksDelivered', 99
+       )
+  FROM campaigns
+ WHERE slug = 'screenwar'
+ON CONFLICT (campaign_id, reason_code) DO NOTHING;
+
+UPDATE campaigns
+   SET accounting_status = 'manual_reconciled',
+       purchased_clicks = 25,
+       guaranteed_clicks_delivered = 25,
+       bonus_clicks_delivered = 74,
+       historical_clicks_delivered = 0,
+       bonus_round_clicks_delivered = 33,
+       clicks_purchased = 25,
+       clicks_delivered = 99,
+       bonus_clicks = 74,
+       bonus_click_cap = GREATEST(COALESCE(bonus_click_cap, 0), 74)
+ WHERE slug = 'screenwar';
 DO $$
 DECLARE old_check record;
 BEGIN
@@ -61,11 +159,38 @@ ALTER TABLE campaigns DROP CONSTRAINT IF EXISTS campaigns_refundable_clicks_chec
 ALTER TABLE campaigns ADD CONSTRAINT campaigns_bonus_clicks_check
   CHECK (bonus_clicks >= 0 AND bonus_clicks <= clicks_delivered);
 ALTER TABLE campaigns ADD CONSTRAINT campaigns_bonus_click_cap_check
-  CHECK (bonus_click_cap IS NULL OR (bonus_click_cap >= 0 AND bonus_clicks <= bonus_click_cap));
+  CHECK (bonus_click_cap IS NULL OR (bonus_click_cap >= 0 AND bonus_round_clicks_delivered <= bonus_click_cap));
 ALTER TABLE campaigns ADD CONSTRAINT campaigns_guaranteed_clicks_check
   CHECK (clicks_delivered - bonus_clicks <= clicks_purchased);
 ALTER TABLE campaigns ADD CONSTRAINT campaigns_refundable_clicks_check
   CHECK (clicks_refunded <= clicks_purchased - (clicks_delivered - bonus_clicks));
+ALTER TABLE campaigns DROP CONSTRAINT IF EXISTS campaigns_accounting_status_check;
+ALTER TABLE campaigns DROP CONSTRAINT IF EXISTS campaigns_verified_accounting_check;
+ALTER TABLE campaigns DROP CONSTRAINT IF EXISTS campaigns_legacy_accounting_check;
+ALTER TABLE campaigns ADD CONSTRAINT campaigns_accounting_status_check
+  CHECK (accounting_status IN ('verified','manual_reconciled','legacy_total_only'));
+ALTER TABLE campaigns ADD CONSTRAINT campaigns_verified_accounting_check
+  CHECK (
+    accounting_status = 'legacy_total_only'
+    OR (
+      purchased_clicks IS NOT NULL
+      AND guaranteed_clicks_delivered IS NOT NULL
+      AND historical_clicks_delivered = 0
+      AND guaranteed_clicks_delivered <= purchased_clicks
+      AND clicks_refunded <= purchased_clicks - guaranteed_clicks_delivered
+    )
+  );
+ALTER TABLE campaigns ADD CONSTRAINT campaigns_legacy_accounting_check
+  CHECK (
+    accounting_status <> 'legacy_total_only'
+    OR (purchased_clicks IS NULL AND guaranteed_clicks_delivered IS NULL)
+  );
+
+-- The old compatibility constraint has now been replaced with an operational bonus
+-- cap, so Screenwar's confirmed 74 historical bonus clicks no longer inflate it.
+UPDATE campaigns
+   SET bonus_click_cap = GREATEST(33, bonus_round_clicks_delivered)
+ WHERE slug = 'screenwar';
 
 CREATE UNIQUE INDEX IF NOT EXISTS campaigns_slug_idx ON campaigns (slug);
 CREATE UNIQUE INDEX IF NOT EXISTS campaigns_one_live_idx
@@ -93,13 +218,21 @@ CREATE TABLE IF NOT EXISTS checkout_intents (
   icon_url               text,
   owner_token_hash       text,
   purchase_ip_hash       text,
+  visitor_id             uuid,
   twclid                 text,
+  attribution            jsonb NOT NULL DEFAULT '{}'::jsonb,
   status                 text NOT NULL DEFAULT 'pending'
                            CHECK (status IN ('pending','completed','expired')),
   expires_at             timestamptz NOT NULL,
   ls_checkout_url        text,
   ls_order_id            text UNIQUE,
+  provider_subtotal_cents integer,
   provider_total_cents   integer,
+  provider_currency      text,
+  provider_test_mode     boolean,
+  delivery_deadline      timestamptz,
+  guaranteed_clicks_delivered integer NOT NULL DEFAULT 0 CHECK (guaranteed_clicks_delivered >= 0),
+  guaranteed_clicks_refunded integer NOT NULL DEFAULT 0 CHECK (guaranteed_clicks_refunded >= 0),
   refund_target_cents    integer NOT NULL DEFAULT 0 CHECK (refund_target_cents >= 0),
   refunded_cents         integer NOT NULL DEFAULT 0 CHECK (refunded_cents >= 0),
   refund_lock_until      timestamptz,
@@ -116,6 +249,28 @@ CREATE INDEX IF NOT EXISTS checkout_intents_refunds_idx
   WHERE refund_target_cents > refunded_cents;
 
 ALTER TABLE checkout_intents ADD COLUMN IF NOT EXISTS refund_lock_until timestamptz;
+ALTER TABLE checkout_intents ADD COLUMN IF NOT EXISTS visitor_id uuid;
+ALTER TABLE checkout_intents ADD COLUMN IF NOT EXISTS attribution jsonb NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE checkout_intents ADD COLUMN IF NOT EXISTS provider_subtotal_cents integer;
+ALTER TABLE checkout_intents ADD COLUMN IF NOT EXISTS provider_currency text;
+ALTER TABLE checkout_intents ADD COLUMN IF NOT EXISTS provider_test_mode boolean;
+ALTER TABLE checkout_intents ADD COLUMN IF NOT EXISTS delivery_deadline timestamptz;
+ALTER TABLE checkout_intents ADD COLUMN IF NOT EXISTS guaranteed_clicks_delivered integer NOT NULL DEFAULT 0;
+ALTER TABLE checkout_intents ADD COLUMN IF NOT EXISTS guaranteed_clicks_refunded integer NOT NULL DEFAULT 0;
+ALTER TABLE checkout_intents DROP CONSTRAINT IF EXISTS checkout_intents_delivery_accounting_check;
+ALTER TABLE checkout_intents ADD CONSTRAINT checkout_intents_delivery_accounting_check
+  CHECK (guaranteed_clicks_delivered + guaranteed_clicks_refunded <= clicks_delta);
+
+UPDATE checkout_intents i
+   SET delivery_deadline = COALESCE(i.delivery_deadline, i.completed_at + interval '7 days'),
+       guaranteed_clicks_delivered = CASE
+         WHEN c.accounting_status IN ('verified','manual_reconciled')
+              AND c.status = 'delivered' AND i.clicks_delta > 0
+           THEN i.clicks_delta
+         ELSE i.guaranteed_clicks_delivered
+       END
+  FROM campaigns c
+ WHERE i.campaign_id = c.id AND i.mode = 'purchase' AND i.status = 'completed';
 
 -- Retire the former standalone leaderboard payment mode. Completed historical rows
 -- remain valid receipts; when none exist, tighten the database constraint as well.
@@ -131,64 +286,72 @@ DO $$ BEGIN
   END IF;
 END $$;
 
--- The only click campaign sold before the August 2026 price change paid $5 for 20
--- clicks. Honor the new 20-cent rate by extending that same purchase to 25 clicks
--- without changing clicks already delivered. If it completed during deployment,
--- reopen it (or queue it when another campaign is already live).
-DO $$
-DECLARE
-  one_hour_id bigint;
-  another_live boolean;
-BEGIN
-  SELECT id INTO one_hour_id
-    FROM campaigns
-   WHERE slug = 'one-hour'
-     AND lower(product_name) = 'one hour'
-     AND amount_paid_cents = 500
-     AND clicks_purchased = 20
-   ORDER BY id DESC
-   LIMIT 1
-   FOR UPDATE;
-
-  IF one_hour_id IS NOT NULL THEN
-    UPDATE checkout_intents
-       SET clicks_delta = 25
-     WHERE campaign_id = one_hour_id
-       AND mode = 'purchase'
-       AND status = 'completed'
-       AND expected_amount_cents = 500
-       AND clicks_delta = 20;
-
-    SELECT EXISTS (
-      SELECT 1 FROM campaigns WHERE status = 'live' AND id <> one_hour_id
-    ) INTO another_live;
-
-    UPDATE campaigns
-       SET clicks_purchased = 25,
-           status = CASE
-             WHEN another_live AND status = 'delivered' THEN 'queued'::campaign_status
-             WHEN NOT another_live THEN 'live'::campaign_status
-             ELSE status
-           END,
-           started_at = CASE WHEN NOT another_live THEN COALESCE(started_at, now()) ELSE started_at END,
-           delivered_at = NULL
-     WHERE id = one_hour_id;
-  END IF;
-END $$;
-
 -- The hour bucket is strictly a click-dedupe window, not a purchasable time unit.
 CREATE TABLE IF NOT EXISTS campaign_clicks (
+  id           bigserial PRIMARY KEY,
   campaign_id  bigint NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
   ip_hash      text NOT NULL,
+  visitor_id   uuid,
   hour_bucket  timestamptz NOT NULL,
   is_bonus     boolean NOT NULL DEFAULT false,
-  created_at   timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (campaign_id, ip_hash, hour_bucket)
+  created_at   timestamptz NOT NULL DEFAULT now()
 );
 
 ALTER TABLE campaign_clicks ADD COLUMN IF NOT EXISTS is_bonus boolean NOT NULL DEFAULT false;
+ALTER TABLE campaign_clicks ADD COLUMN IF NOT EXISTS visitor_id uuid;
+ALTER TABLE campaign_clicks ADD COLUMN IF NOT EXISTS id bigserial;
+ALTER TABLE campaign_clicks DROP CONSTRAINT IF EXISTS campaign_clicks_pkey;
+ALTER TABLE campaign_clicks ADD CONSTRAINT campaign_clicks_pkey PRIMARY KEY (id);
 
 CREATE INDEX IF NOT EXISTS campaign_clicks_created_idx ON campaign_clicks (created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS campaign_clicks_campaign_visitor_idx
+  ON campaign_clicks (campaign_id, visitor_id) WHERE visitor_id IS NOT NULL;
+
+-- Every outbound attempt is retained for diagnostics. Only a row linked from
+-- campaign_clicks has affected a delivered counter.
+CREATE TABLE IF NOT EXISTS campaign_click_events (
+  id              bigserial PRIMARY KEY,
+  campaign_id     bigint REFERENCES campaigns(id) ON DELETE SET NULL,
+  visitor_id      uuid,
+  ip_hash         text NOT NULL,
+  user_agent      text,
+  bonus_requested boolean NOT NULL DEFAULT false,
+  outcome         text NOT NULL CHECK (
+                    outcome IN ('counted_guaranteed','counted_bonus','duplicate','bot',
+                                'owner','rate_limited','not_active','not_found','error')
+                  ),
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS campaign_click_events_visitor_rate_idx
+  ON campaign_click_events (visitor_id, created_at DESC) WHERE visitor_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS campaign_click_events_ip_rate_idx
+  ON campaign_click_events (ip_hash, created_at DESC);
+CREATE INDEX IF NOT EXISTS campaign_click_events_campaign_idx
+  ON campaign_click_events (campaign_id, created_at DESC);
+
+-- Canonical funnel ledger. The unique key is local idempotency; Vemetric and X are
+-- downstream views of these rows rather than independent sources of truth.
+CREATE TABLE IF NOT EXISTS analytics_events (
+  id                  bigserial PRIMARY KEY,
+  event_name          text NOT NULL,
+  idempotency_key     text NOT NULL,
+  visitor_id          uuid,
+  campaign_id         bigint REFERENCES campaigns(id) ON DELETE SET NULL,
+  checkout_intent_id  uuid REFERENCES checkout_intents(id) ON DELETE SET NULL,
+  order_id            text,
+  event_data          jsonb NOT NULL DEFAULT '{}'::jsonb,
+  vemetric_sent_at    timestamptz,
+  x_sent_at           timestamptz,
+  delivery_attempts   integer NOT NULL DEFAULT 0,
+  last_error          text,
+  created_at          timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (event_name, idempotency_key)
+);
+
+CREATE INDEX IF NOT EXISTS analytics_events_pending_idx
+  ON analytics_events (created_at)
+  WHERE vemetric_sent_at IS NULL OR (event_name = 'purchase_completed' AND x_sent_at IS NULL);
 
 -- Anonymous browser-backed visitors power the cumulative since-launch count. This is
 -- deliberately independent from campaign delivery and stores no network address.
@@ -204,19 +367,24 @@ CREATE INDEX IF NOT EXISTS visitors_last_seen_idx ON visitors (last_seen_at);
 CREATE TABLE IF NOT EXISTS site_config (
   singleton                  boolean PRIMARY KEY DEFAULT true CHECK (singleton),
   click_rate_cents           integer NOT NULL DEFAULT 20 CHECK (click_rate_cents = 20),
-  max_outstanding_clicks     integer NOT NULL DEFAULT 150 CHECK (max_outstanding_clicks >= 150),
+  max_outstanding_clicks     integer NOT NULL DEFAULT 250 CHECK (max_outstanding_clicks >= 250),
   cap_recomputed_at          timestamptz NOT NULL DEFAULT now()
 );
 
 -- Keep the singleton aligned when this schema is applied to an existing database.
 ALTER TABLE site_config DROP CONSTRAINT IF EXISTS site_config_click_rate_cents_check;
+ALTER TABLE site_config DROP CONSTRAINT IF EXISTS site_config_max_outstanding_clicks_check;
 ALTER TABLE site_config ALTER COLUMN click_rate_cents SET DEFAULT 20;
+ALTER TABLE site_config ALTER COLUMN max_outstanding_clicks SET DEFAULT 250;
 UPDATE site_config SET click_rate_cents = 20 WHERE singleton = true;
+UPDATE site_config SET max_outstanding_clicks = GREATEST(max_outstanding_clicks, 250) WHERE singleton = true;
 ALTER TABLE site_config ADD CONSTRAINT site_config_click_rate_cents_check
   CHECK (click_rate_cents = 20);
+ALTER TABLE site_config ADD CONSTRAINT site_config_max_outstanding_clicks_check
+  CHECK (max_outstanding_clicks >= 250);
 
 INSERT INTO site_config (singleton, click_rate_cents, max_outstanding_clicks)
-VALUES (true, 20, 150)
+VALUES (true, 20, 250)
 ON CONFLICT (singleton) DO NOTHING;
 
 -- Preserve every permanent listing from the previous Wall as a delivered legacy

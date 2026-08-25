@@ -40,7 +40,13 @@ export async function createCheckout(input: CheckoutInput): Promise<string> {
           custom_price: input.priceCents,
           expires_at: input.expiresAt.toISOString(),
           checkout_data: {
-            custom: { intent_id: input.intentId, mode: input.mode },
+            custom: {
+              intent_id: input.intentId,
+              mode: input.mode,
+              // Lemon Squeezy requires every checkout_data.custom value to be a string.
+              click_quantity: String(input.clicks ?? 0),
+              expected_amount_cents: String(input.priceCents),
+            },
           },
           product_options: {
             name: `Guaranteed clicks from ${config.siteName}`,

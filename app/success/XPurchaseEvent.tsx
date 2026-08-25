@@ -19,27 +19,29 @@ export function XPurchaseEvent({
   eventId,
   conversionId,
   amountCents,
+  currency,
 }: {
   /** config.xPixel.purchaseEventId, e.g. "tw-rem4r-remj0". Skipped when unset. */
   eventId: string;
   conversionId: string;
   amountCents: number;
+  currency: string;
 }) {
   useEffect(() => {
     if (!eventId) return;
     try {
       const flag = `x-purchase-tracked:${conversionId}`;
-      if (sessionStorage.getItem(flag)) return;
-      window.twq?.("event", eventId, {
+      if (localStorage.getItem(flag) || typeof window.twq !== "function") return;
+      window.twq("event", eventId, {
         value: (amountCents / 100).toFixed(2),
-        currency: "USD",
+        currency,
         conversion_id: conversionId,
       });
-      sessionStorage.setItem(flag, "1");
+      localStorage.setItem(flag, "1");
     } catch {
-      // sessionStorage can be blocked (embedded browsers); skip rather than double-fire.
+      // Storage can be blocked in embedded browsers; skip rather than risk double-firing.
     }
-  }, [eventId, conversionId, amountCents]);
+  }, [eventId, conversionId, amountCents, currency]);
 
   return null;
 }

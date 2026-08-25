@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
-import { vemetric } from "@vemetric/react";
+import { useCallback, useEffect } from "react";
+import Link from "next/link";
 import { ArrowIcon } from "@/components/ArrowIcon";
 import { useClicks } from "@/components/ClicksProvider";
 import { ProductLogo, productImageUrl } from "@/components/ProductLogo";
@@ -13,9 +13,11 @@ export type LiveCampaignData = {
   pitch: string | null;
   url: string;
   iconUrl: string | null;
-  paidClicks: number;
-  clicksDelivered: number;
-  bonusClicks: number;
+  accountingStatus: "verified" | "manual_reconciled" | "legacy_total_only";
+  purchasedClicks: number | null;
+  guaranteedClicksDelivered: number | null;
+  bonusClicksDelivered: number;
+  totalClicksDelivered: number;
   bonus: boolean;
 };
 
@@ -36,73 +38,65 @@ function heroProductName(name: string): string {
   return `${body.replace(/[\s,;:.\-]+$/, "")}…`;
 }
 
-function focusClaim() {
-  window.dispatchEvent(new Event("yourhour:focus-claim"));
-}
-
 export function LiveHour({ data }: { data: LiveCampaignData | null }) {
   const visitors = useVisitors();
-  const { deliveredTotal, deliveredToday, live, refresh } = useClicks();
-  const clicks = live && live.id === data?.id ? live.clicksDelivered : data?.clicksDelivered ?? 0;
-  const bonusClicks = live && live.id === data?.id ? live.bonusClicks : data?.bonusClicks ?? 0;
-  const guaranteedClicks = Math.max(0, clicks - bonusClicks);
-  const timeouts = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const { deliveredTotal, deliveredLast24h, live, notifyClick } = useClicks();
+  const clicks = live && live.id === data?.id ? live.clicksDelivered : data?.totalClicksDelivered ?? 0;
+  const bonusClicks = live && live.id === data?.id ? live.bonusClicks : data?.bonusClicksDelivered ?? 0;
+  const guaranteedClicks = data?.guaranteedClicksDelivered === null || data?.guaranteedClicksDelivered === undefined
+    ? Math.max(0, clicks - bonusClicks)
+    : Math.max(data.guaranteedClicksDelivered, clicks - bonusClicks);
 
   useEffect(() => {
     if ((live?.id ?? null) !== (data?.id ?? null) || (live?.bonus ?? false) !== (data?.bonus ?? false)) window.location.reload();
   }, [live?.id, live?.bonus, data?.id, data?.bonus]);
 
-  useEffect(() => {
-    const pending = timeouts.current;
-    return () => {
-      pending.forEach(clearTimeout);
-      pending.length = 0;
-    };
-  }, []);
-
   const onVisit = useCallback(() => {
-    if (!data) return;
-    vemetric.trackEvent(data.bonus ? "bonus_visit_clicked" : "live_visit_clicked", { eventData: { campaignId: data.id } });
-    [900, 3000].forEach((delay) => timeouts.current.push(setTimeout(refresh, delay)));
-  }, [data, refresh]);
+    if (data) notifyClick();
+  }, [data, notifyClick]);
+
+  // A paid campaign still working through the clicks it bought leads on small screens —
+  // that delivery is what the buyer paid for. Once it is only earning bonus clicks (or
+  // nothing is live), the pitch takes the top spot back. Desktop keeps pitch-then-card.
+  const featuredLeadsOnMobile = data !== null && !data.bonus;
 
   const background = data ? productImageUrl(data.iconUrl, data.url) : null;
   const displayProductName = data ? heroProductName(data.productName) : "";
-  const progress = data ? Math.min(100, (guaranteedClicks / Math.max(1, data.paidClicks)) * 100) : 0;
-  const toGo = data ? Math.max(0, data.paidClicks - guaranteedClicks) : 0;
+  const progress = data?.purchasedClicks ? Math.min(100, (guaranteedClicks / Math.max(1, data.purchasedClicks)) * 100) : 0;
+  const toGo = data?.purchasedClicks ? Math.max(0, data.purchasedClicks - guaranteedClicks) : 0;
 
   return (
     <section
       id="now"
-      className="landing-shell grid min-h-[calc(100svh-141px)] scroll-mt-40 items-center gap-14 py-10 md:py-20 lg:grid-cols-[.9fr_1.1fr] lg:gap-[7vw]"
+      className="landing-shell grid min-h-[calc(100svh-141px)] scroll-mt-40 items-center gap-14 py-10 md:py-20 lg:grid-cols-[1fr_1.1fr] lg:gap-[2.5vw]"
     >
-      <div className="order-2 text-center md:order-1 lg:text-left">
-        <h1 className="mb-5 mt-0 text-[clamp(52px,6.2vw,92px)] font-normal leading-[.92] tracking-[-.075em]">
-          One product.
-          <br />
-          <em className="not-italic text-violet">Every visitor.</em>
-          <br />
-          Until your clicks land.
+      <div className={`text-center [container-type:inline-size] lg:order-1 lg:text-left ${featuredLeadsOnMobile ? "order-2" : "order-1"}`}>
+        {/* Each line is a fixed row of the headline, so the type is sized from this column's
+            width (cqw) rather than the viewport: the longest row always fits without wrapping.
+            The coefficient is set from the widest font in the .landing-page stack. */}
+        <h1 className="mb-5 mt-0 text-[clamp(24px,9.4cqw,64px)] font-normal leading-[1.03] tracking-[-.075em] lg:text-[clamp(24px,11.4cqw,76px)]">
+          <span className="block whitespace-nowrap">One featured product.</span>
+          <span className="block whitespace-nowrap text-violet">Visible to everyone.</span>
+          <span className="block whitespace-nowrap">Until its purchased</span>
+          <span className="block whitespace-nowrap">visits are delivered.</span>
         </h1>
         <p className="mx-auto max-w-[620px] text-[clamp(17px,1.5vw,20px)] leading-[1.55] tracking-[-.02em] text-muted lg:mx-0">
-          You&apos;re not buying views or minutes. You&apos;re buying clicks. Your product owns this entire page — alone, no list, no competitors — until every one of them lands. However long that takes.
+          Feature your product on the homepage and pay only for valid visitor click-throughs. Visitors choose whether to open the featured product.
         </p>
         <div className="mt-14 flex flex-col items-center justify-center gap-5 sm:flex-row lg:justify-start">
-          <button type="button" onClick={focusClaim} className={CTA}>
-            Get clicks <ArrowIcon />
-          </button>
+          <Link href="/get-clicks" className={CTA}>Feature your product — from $5 <ArrowIcon /></Link>
           <a href="#how" className="text-sm font-bold text-muted hover:text-foreground">
             See how it works <span className="ml-1 text-accent">↓</span>
           </a>
         </div>
         <div className="mt-7 flex flex-wrap items-center justify-center gap-x-7 gap-y-2 text-xs text-faint lg:justify-start">
-          <span><b className="text-foreground tabular">{deliveredToday.toLocaleString()}</b> clicks delivered today</span>
-          <span><b className="text-foreground tabular">{deliveredTotal.toLocaleString()}</b> clicks delivered</span>
+          <span><b className="text-foreground tabular">{deliveredLast24h.toLocaleString()}</b> clicks in the last 24h</span>
+          <span><b className="text-foreground tabular">{deliveredTotal.toLocaleString()}</b> clicks so far</span>
           <span><b className="text-foreground tabular">{visitors.toLocaleString()}</b> visitors since launch</span>
         </div>
       </div>
 
-      <article className="relative order-1 flex min-h-[560px] flex-col overflow-hidden rounded-[30px] border border-violet/40 bg-[image:radial-gradient(circle_at_72%_16%,rgba(155,124,255,.28),transparent_32%),radial-gradient(circle_at_12%_84%,rgba(119,231,255,.14),transparent_30%)] bg-[#11131a] shadow-[0_25px_110px_rgba(58,35,140,.26)] md:order-2">
+      <article className={`relative flex min-h-[560px] flex-col overflow-hidden rounded-[30px] border border-violet/40 bg-[image:radial-gradient(circle_at_72%_16%,rgba(155,124,255,.28),transparent_32%),radial-gradient(circle_at_12%_84%,rgba(119,231,255,.14),transparent_30%)] bg-[#11131a] shadow-[0_25px_110px_rgba(58,35,140,.26)] lg:order-2 ${featuredLeadsOnMobile ? "order-1" : "order-2"}`}>
         {background ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={background} alt="" aria-hidden="true" referrerPolicy="no-referrer" className="landing-product-backdrop absolute inset-0 h-full w-full object-cover" onError={(event) => { event.currentTarget.hidden = true; }} />
@@ -128,12 +122,14 @@ export function LiveHour({ data }: { data: LiveCampaignData | null }) {
                 <span className="min-w-0 truncate">Visit {displayProductName}</span> <ArrowIcon className="h-5 w-5 shrink-0" />
               </a>
               <div className="mt-4 flex w-full flex-wrap items-baseline gap-x-2 gap-y-1 text-sm tabular">
-                <span className="text-faint">Paid for <b className="font-medium text-muted">{data.paidClicks.toLocaleString()}</b> clicks</span>
-                <span className="text-faint">·</span>
-                <span className="text-faint">delivered <b className={`ml-1 text-xl font-semibold ${bonusClicks > 0 ? "text-accent" : "text-muted"}`}>{clicks.toLocaleString()}</b></span>
+                {data.accountingStatus === "legacy_total_only" ? (
+                  <span className="text-faint"><b className="text-xl font-semibold text-accent">{clicks.toLocaleString()}</b> total clicks received</span>
+                ) : (
+                  <><span className="text-faint">Purchased: <b className="text-muted">{data.purchasedClicks?.toLocaleString()}</b></span><span className="text-faint">·</span><span className="text-faint">Delivered: <b className="text-muted">{guaranteedClicks.toLocaleString()}/{data.purchasedClicks?.toLocaleString()}</b></span><span className="text-faint">· Bonus: <b className="text-accent">{bonusClicks.toLocaleString()}</b> · Total: <b className="text-foreground">{clicks.toLocaleString()}</b></span></>
+                )}
               </div>
-              <p className="mt-6 max-w-[500px] leading-relaxed text-[#b7bbc4]">Nobody&apos;s in the queue, so our top product keeps the page. Paste your link and it&apos;s yours instantly.</p>
-              <button type="button" onClick={focusClaim} className={`mt-6 ${CTA}`}>Get clicks — from $5 <ArrowIcon /></button>
+              <p className="mt-6 max-w-[500px] leading-relaxed text-[#b7bbc4]">Nobody&apos;s in the queue, so an eligible delivered product is receiving extra traffic. Bonus clicks are not guaranteed.</p>
+              <div className="mt-6"><p className="mb-2 text-sm font-semibold">Want clicks for your product?</p><Link href="/get-clicks" className={CTA}>Feature your product — from $5 <ArrowIcon /></Link></div>
             </>
           ) : data ? (
             <>
@@ -148,16 +144,17 @@ export function LiveHour({ data }: { data: LiveCampaignData | null }) {
                   <div className="h-full rounded-full bg-accent transition-[width]" style={{ width: `${progress}%` }} />
                 </div>
                 <div className="mt-2 flex justify-between gap-4 text-xs text-muted">
-                  <span className="tabular">{guaranteedClicks.toLocaleString()} of {data.paidClicks.toLocaleString()} clicks delivered</span>
+                  <span className="tabular">{guaranteedClicks.toLocaleString()} of {data.purchasedClicks?.toLocaleString()} guaranteed clicks so far</span>
                   <span className="tabular">{toGo.toLocaleString()} to go</span>
                 </div>
               </div>
+              <div className="mt-7"><p className="mb-2 text-sm font-semibold">Want clicks for your product?</p><Link href="/get-clicks" className={CTA}>Feature your product — from $5 <ArrowIcon /></Link></div>
             </>
           ) : (
             <>
               <h2 className="text-[clamp(42px,5vw,65px)] font-normal leading-[.95] tracking-[-.055em]">The next product here is yours.</h2>
               <p className="mt-4 max-w-md leading-relaxed text-[#b7bbc4]">Paste your link and you&apos;re live in under a minute. Nobody&apos;s ahead of you, so your clicks start the moment you pay.</p>
-              <button type="button" onClick={focusClaim} className={`mt-8 ${CTA}`}>Get clicks — from $5 <ArrowIcon /></button>
+              <Link href="/get-clicks" className={`mt-8 ${CTA}`}>Feature your product — from $5 <ArrowIcon /></Link>
             </>
           )}
         </div>
