@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getCampaignById } from "@/lib/campaigns";
+import { getListingById } from "@/lib/leaderboard";
 import { hashIp, isObviousBot, requestUserAgent } from "@/lib/click";
 import { config } from "@/lib/config";
 import { recordCampaignClick } from "@/lib/delivery";
@@ -15,20 +15,18 @@ export async function GET(
   const { id } = await params;
   if (!/^\d+$/.test(id)) return NextResponse.redirect(new URL("/", config.siteUrl));
 
-  const campaign = await getCampaignById(id).catch(() => null);
+  const campaign = await getListingById(id).catch(() => null);
   if (!campaign?.url) return NextResponse.redirect(new URL("/", config.siteUrl));
 
   const visitor = ensureVisitorId(request);
   let destination = campaign.url;
   try {
-    const bonusRequested = new URL(request.url).searchParams.get("bonus") === "1";
     const ownerToken = ownerTokenFromRequest(request);
     const outcome = await recordCampaignClick({
       campaignId: id,
       visitorId: visitor.id,
       ipHash: hashIp(request),
       userAgent: requestUserAgent(request),
-      bonusRequested,
       obviousBot: isObviousBot(request),
       ownerTokenHash: ownerToken ? hashOwnerToken(ownerToken) : null,
     });

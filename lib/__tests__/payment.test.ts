@@ -1,14 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { priceForClicks } from "../pricing";
 import { paidOrderValidationError } from "../sale";
 import { createCheckout } from "../lemonsqueezy";
-
-test("the server-calculated minimum is $5 and 50 clicks is $10", () => {
-  assert.equal(priceForClicks(25), 500);
-  assert.equal(priceForClicks(50), 1000);
-  assert.equal(priceForClicks(100), 2000);
-});
 
 test("verified payment fields must agree with the server price", () => {
   assert.equal(paidOrderValidationError(500, { providerSubtotalCents: 500, providerTotalCents: 500, providerCurrency: "USD" }), null);
@@ -35,14 +28,12 @@ test("Lemon Squeezy checkout custom metadata uses strings", async () => {
       intentId: "intent-1",
       expiresAt: new Date("2026-08-31T00:00:00.000Z"),
       productName: "Example",
-      mode: "purchase",
-      clicks: 25,
+      mode: "bid",
     });
     const parsed = JSON.parse(requestBody) as {
       data: { attributes: { checkout_data: { custom: Record<string, unknown> } } };
     };
     const custom = parsed.data.attributes.checkout_data.custom;
-    assert.equal(custom.click_quantity, "25");
     assert.equal(custom.expected_amount_cents, "500");
   } finally {
     globalThis.fetch = originalFetch;

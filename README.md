@@ -1,22 +1,19 @@
-# yourhour
+# YourHour
 
-One product takes the featured spot until its guaranteed outbound clicks are delivered.
+YourHour is a permanent product leaderboard. The highest bidder owns the homepage; every completed buyer remains listed forever.
 
 ## Product model
 
-- 20¢ per counted outbound click (`CLICK_RATE_CENTS` in `lib/pricing.ts`)
-- orders start at 25 clicks / $5 and stay at the fixed 20¢ rate up to 250 clicks
-- quick choices of 50, 100, 200 and 250, plus synchronized click and price controls
-- one live campaign; remaining campaigns ordered by paid priority then creation date
-- permanent `/u/{slug}` pages and a leaderboard ranked by cumulative amount paid
-- queue jumps add to both queue priority and leaderboard total
-- undelivered inventory is refunded seven days after its verified purchase
+- the first product bids $3
+- bids are whole US dollars
+- paying $1 more than a product beats that position
+- the same domain maps to one listing
+- an owner upgrading an existing listing pays only the difference
+- rank is calculated when payment completes; checkout does not reserve a position
+- completed bids are final and non-refundable
+- outbound visits use `/r/{listingId}` and count once per eligible visitor per product
 
-The counted product link is `/r/{campaignId}`. It uses a stable anonymous visitor cookie
-and a database uniqueness rule to count at most one delivered click per visitor and
-campaign. Obvious bots, suspicious repeated activity, and technically reliable owner
-matches are excluded; raw attempts remain available for diagnostics. See
-[`docs/click-accounting.md`](docs/click-accounting.md) for the exact definition.
+Legacy guaranteed-click payments are preserved in `leaderboard_migration_audits` before being rounded up to whole-dollar leaderboard totals. The old delivery columns remain temporarily for rollback but are no longer used by the application.
 
 ## Local setup
 
@@ -24,32 +21,24 @@ matches are excluded; raw attempts remain available for diagnostics. See
 npm install
 cp .env.example .env.local
 npm run migrate
+npm run seed:demo
 npm run dev
 ```
 
-With Lemon Squeezy variables unset, checkout uses the local completion stub. Seed visual
-development data with `npm run seed:demo`.
+With Lemon Squeezy variables unset, checkout uses the local completion stub. The configured Lemon Squeezy variant must accept custom prices as low as $1 because an owner can buy a one-dollar upgrade. The webhook endpoint is `/api/webhooks/lemonsqueezy`.
 
-## Deployment migration
+`/api/cron/tick` expires abandoned bid intents and retries durable analytics delivery. It does not promote campaigns, calculate capacity, or issue refunds.
 
-`lib/schema.sql` migrates legacy permanent listings into delivered campaigns and then
-removes the retired scheduling tables. Take a backup first and pause new purchases while
-the migration and application deploy cross over:
+## Production migration
+
+Back up the database and briefly pause checkout before applying the schema:
 
 ```bash
 npm run backup
 npm run migrate
 ```
 
-The webhook must point to `/api/webhooks/lemonsqueezy`. The provider variant must allow
-custom prices including 500 cents. The checkout sends integer-cent `custom_price` values.
-
-`/api/cron/tick` expires abandoned checkout holds, reconciles partial refunds, and
-recomputes the supply cap once per day. `vercel.json` invokes it daily at 00:17 UTC so
-the project can deploy on Vercel Hobby. For tighter reconciliation, an external scheduler
-may call it hourly with `Authorization: Bearer $CRON_SECRET`. The cap is three times
-trailing delivered volume with a floor of 250 clicks, so every advertised package can
-be purchased when the queue is otherwise empty.
+Verify the migration audit, normalized totals, original tie order, and click totals before resuming checkout. Do not remove the legacy delivery columns until the new model has been stable for at least seven days.
 
 ## Verification
 
@@ -60,5 +49,4 @@ npx tsc --noEmit --incremental false
 npm run build
 ```
 
-Before production, also create a $5 checkout against the Lemon Squeezy test store and
-complete it to confirm the configured variant's custom-price minimum.
+Before production launch, complete both a $3 new-listing checkout and a $1 existing-owner upgrade in the Lemon Squeezy test store.

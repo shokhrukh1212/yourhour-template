@@ -1,40 +1,31 @@
-export const CLICK_RATE_CENTS = 20;
-export const MIN_ENTRY_CENTS = 500;
-export const MIN_CLICKS = Math.ceil(MIN_ENTRY_CENTS / CLICK_RATE_CENTS);
-export const MAX_CLICKS = 250;
-export const CLICK_PACKAGES = [50, 100, 200, 250] as const;
-export const DEFAULT_CLICKS = CLICK_PACKAGES[0];
-export const DEFAULT_CHECKOUT_CLICKS = CLICK_PACKAGES[1];
-export const DEFAULT_PRICE_CENTS = DEFAULT_CLICKS * CLICK_RATE_CENTS;
-// A whole-dollar price adjustment is five clicks at the fixed 20¢ rate.
-export const CLICK_STEP = 5;
+export const STARTING_BID_CENTS = 300;
+export const BID_STEP_CENTS = 100;
+export const MAX_BID_CENTS = 1_000_000;
 
-export const QUEUE_JUMP_STEP_CENTS = 100;
-export const MIN_JUMP_CENTS = 200;
-
-export function priceForClicks(clicks: number): number {
-  return clicks * CLICK_RATE_CENTS;
+export function nextBidCents(currentBidCents: number | null): number {
+  return currentBidCents === null ? STARTING_BID_CENTS : Math.max(STARTING_BID_CENTS, currentBidCents + BID_STEP_CENTS);
 }
 
-export function clickPackageForInput(raw: string): (typeof CLICK_PACKAGES)[number] | null {
-  if (!/^\d+$/.test(raw)) return null;
-  const value = Number(raw);
-  return CLICK_PACKAGES.find((option) => option === value) ?? null;
+export function normalizeLegacyBidCents(amountPaidCents: number): number {
+  return Math.max(BID_STEP_CENTS, Math.ceil(Math.max(0, amountPaidCents) / BID_STEP_CENTS) * BID_STEP_CENTS);
 }
 
-export function jumpPrice(highestQueuedPriority: number | null): number {
-  return Math.max(MIN_JUMP_CENTS, (highestQueuedPriority ?? 0) + QUEUE_JUMP_STEP_CENTS);
+export function amountDueCents(currentBidCents: number | null, targetBidCents: number): number {
+  return targetBidCents - (currentBidCents ?? 0);
 }
 
-export function formatPrice(cents: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: cents % 100 === 0 ? 0 : 2,
-    maximumFractionDigits: 2,
-  }).format(cents / 100);
+/** Every verified dollar remains credited even if another checkout completed first. */
+export function settledBidCents(currentBidCents: number, targetBidCents: number, amountChargedCents: number): number {
+  return Math.max(targetBidCents, currentBidCents + amountChargedCents);
 }
 
-export function formatClickRate(cents = CLICK_RATE_CENTS): string {
-  return cents < 100 ? `${cents}¢` : formatPrice(cents);
+export function isWholeDollarBid(value: number): boolean {
+  return Number.isSafeInteger(value) && value >= STARTING_BID_CENTS && value <= MAX_BID_CENTS && value % BID_STEP_CENTS === 0;
+}
+
+/** Keeps a controlled dollar input empty while editing and removes leading zeroes. */
+export function normalizeDollarInput(value: string): string | null {
+  if (value === "") return "";
+  if (!/^\d+$/.test(value)) return null;
+  return value.replace(/^0+(?=\d)/, "");
 }

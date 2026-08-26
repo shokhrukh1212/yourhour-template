@@ -272,19 +272,17 @@ UPDATE checkout_intents i
   FROM campaigns c
  WHERE i.campaign_id = c.id AND i.mode = 'purchase' AND i.status = 'completed';
 
--- Retire the former standalone leaderboard payment mode. Completed historical rows
--- remain valid receipts; when none exist, tighten the database constraint as well.
+-- Retire pending rows from the former standalone leaderboard payment mode. Completed
+-- historical rows remain valid receipts. Keep the constraint compatible with both
+-- those historical modes and the current bid mode so rerunning this schema never
+-- rejects checkout rows created by a newer release.
 UPDATE checkout_intents
    SET status = 'expired'
  WHERE mode = 'rank_boost' AND status = 'pending';
 
-DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM checkout_intents WHERE mode = 'rank_boost') THEN
-    ALTER TABLE checkout_intents DROP CONSTRAINT IF EXISTS checkout_intents_mode_check;
-    ALTER TABLE checkout_intents ADD CONSTRAINT checkout_intents_mode_check
-      CHECK (mode IN ('purchase','jump'));
-  END IF;
-END $$;
+ALTER TABLE checkout_intents DROP CONSTRAINT IF EXISTS checkout_intents_mode_check;
+ALTER TABLE checkout_intents ADD CONSTRAINT checkout_intents_mode_check
+  CHECK (mode IN ('purchase','jump','rank_boost','bid'));
 
 -- The hour bucket is strictly a click-dedupe window, not a purchasable time unit.
 CREATE TABLE IF NOT EXISTS campaign_clicks (
@@ -477,3 +475,107 @@ DROP TABLE IF EXISTS counters CASCADE;
 DROP SEQUENCE IF EXISTS claim_number_seq;
 DROP TYPE IF EXISTS slot_status;
 DROP TYPE IF EXISTS wall_kind;
+
+-- Permanent paid leaderboard migration (2026-08-25).
+-- Keep the delivery-era columns for a rollback window, but the application now reads
+-- only the canonical bid and verified-click fields below.
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS normalized_domain text;
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS bid_cents integer;
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS verified_clicks integer;
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS bid_placed_at timestamptz;
+
+CREATE TABLE IF NOT EXISTS leaderboard_migration_audits (
+  campaign_id                 bigint PRIMARY KEY REFERENCES campaigns(id) ON DELETE CASCADE,
+  original_amount_paid_cents  integer NOT NULL,
+  normalized_bid_cents        integer NOT NULL,
+  original_rank               integer NOT NULL,
+  original_clicks             integer NOT NULL,
+  migrated_at                 timestamptz NOT NULL DEFAULT now()
+);
+
+WITH legacy_rank AS (
+  SELECT id, amount_paid_cents,
+         GREATEST(100, ceil(amount_paid_cents / 100.0)::int * 100) AS normalized_bid,
+         row_number() OVER (ORDER BY amount_paid_cents DESC, created_at ASC, id ASC)::int AS original_rank,
+         total_clicks_delivered AS original_clicks
+    FROM campaigns
+   WHERE bid_cents IS NULL
+)
+INSERT INTO leaderboard_migration_audits
+  (campaign_id, original_amount_paid_cents, normalized_bid_cents, original_rank, original_clicks)
+SELECT id, amount_paid_cents, normalized_bid, original_rank, original_clicks FROM legacy_rank
+ON CONFLICT (campaign_id) DO NOTHING;
+
+UPDATE campaigns c
+   SET normalized_domain = lower(regexp_replace(regexp_replace(regexp_replace(
+         split_part(regexp_replace(c.url, '^https?://', '', 'i'), '/', 1),
+         '^.*@', ''), '^www\.', '', 'i'), ':[0-9]+$', '')),
+       bid_cents = a.normalized_bid_cents,
+       verified_clicks = a.original_clicks,
+       -- Unique rank-based timestamps preserve the exact old order inside rounded ties.
+       bid_placed_at = timestamptz '2000-01-01 00:00:00+00' + (a.original_rank || ' seconds')::interval
+  FROM leaderboard_migration_audits a
+ WHERE a.campaign_id = c.id
+   AND (c.bid_cents IS NULL OR c.verified_clicks IS NULL OR c.bid_placed_at IS NULL OR c.normalized_domain IS NULL);
+
+ALTER TABLE campaigns ALTER COLUMN normalized_domain SET NOT NULL;
+ALTER TABLE campaigns ALTER COLUMN bid_cents SET NOT NULL;
+ALTER TABLE campaigns ALTER COLUMN verified_clicks SET NOT NULL;
+ALTER TABLE campaigns ALTER COLUMN verified_clicks SET DEFAULT 0;
+ALTER TABLE campaigns ALTER COLUMN bid_placed_at SET NOT NULL;
+ALTER TABLE campaigns ALTER COLUMN bid_placed_at SET DEFAULT now();
+ALTER TABLE campaigns DROP CONSTRAINT IF EXISTS campaigns_bid_cents_check;
+ALTER TABLE campaigns ADD CONSTRAINT campaigns_bid_cents_check
+  CHECK (bid_cents >= 100 AND bid_cents <= 1000000 AND bid_cents % 100 = 0);
+ALTER TABLE campaigns DROP CONSTRAINT IF EXISTS campaigns_verified_clicks_check;
+ALTER TABLE campaigns ADD CONSTRAINT campaigns_verified_clicks_check CHECK (verified_clicks >= 0);
+CREATE UNIQUE INDEX IF NOT EXISTS campaigns_normalized_domain_idx ON campaigns (normalized_domain);
+CREATE INDEX IF NOT EXISTS campaigns_bid_rank_idx ON campaigns (bid_cents DESC, bid_placed_at ASC, id ASC);
+
+-- Owner-authorized promotional credit for whoisnext.lol. The customer paid $5 for
+-- the previous guaranteed-click product, but is displayed at $7 on the leaderboard
+-- so the remaining 25-click obligation starts from the homepage. Keep the actual
+-- historical payment untouched, and never reduce a later paid upgrade.
+UPDATE campaigns
+   SET bid_cents = GREATEST(bid_cents, 700)
+ WHERE normalized_domain = 'whoisnext.lol'
+   AND amount_paid_cents = 500;
+
+-- One-time editorial correction for the legacy Safe Elephant listing. Its scraped
+-- description used to contain the current owner's social link, which is not product
+-- information and must not follow the listing into the permanent leaderboard.
+UPDATE campaigns
+   SET product_name = 'Most expensive link',
+       pitch = 'The most expensive link on the internet.'
+ WHERE normalized_domain = 'safeelephant.co.uk';
+
+-- Normalize legacy domain-style names using the same conservative word splits used
+-- for new submissions. Descriptions and all payment/click data remain untouched.
+UPDATE campaigns SET product_name = 'Who is next'
+ WHERE normalized_domain = 'whoisnext.lol';
+UPDATE campaigns SET product_name = 'Screen war'
+ WHERE normalized_domain IN ('screenwar.lol', 'screenwar.app');
+
+-- These legacy rows predate icon scraping. Use the square icons declared by each
+-- product instead of Google's successful-but-generic globe favicon response.
+UPDATE campaigns SET icon_url = 'https://whoisnext.lol/apple-touch-icon.png'
+ WHERE normalized_domain = 'whoisnext.lol' AND icon_url IS NULL;
+UPDATE campaigns SET icon_url = 'https://screenwar.lol/coin.png'
+ WHERE normalized_domain IN ('screenwar.lol', 'screenwar.app') AND icon_url IS NULL;
+
+ALTER TABLE checkout_intents ADD COLUMN IF NOT EXISTS target_bid_cents integer;
+ALTER TABLE checkout_intents ADD COLUMN IF NOT EXISTS normalized_domain text;
+ALTER TABLE checkout_intents DROP CONSTRAINT IF EXISTS checkout_intents_mode_check;
+ALTER TABLE checkout_intents ADD CONSTRAINT checkout_intents_mode_check CHECK (mode IN ('purchase','jump','rank_boost','bid'));
+ALTER TABLE checkout_intents DROP CONSTRAINT IF EXISTS checkout_intents_target_bid_check;
+ALTER TABLE checkout_intents ADD CONSTRAINT checkout_intents_target_bid_check
+  CHECK (target_bid_cents IS NULL OR (target_bid_cents >= 300 AND target_bid_cents <= 1000000 AND target_bid_cents % 100 = 0));
+UPDATE checkout_intents SET status = 'expired' WHERE mode IN ('purchase','jump') AND status = 'pending';
+CREATE UNIQUE INDEX IF NOT EXISTS checkout_intents_one_pending_domain_idx
+  ON checkout_intents (normalized_domain) WHERE mode = 'bid' AND status = 'pending';
+
+ALTER TABLE campaign_click_events DROP CONSTRAINT IF EXISTS campaign_click_events_outcome_check;
+ALTER TABLE campaign_click_events ADD CONSTRAINT campaign_click_events_outcome_check CHECK (
+  outcome IN ('counted','counted_guaranteed','counted_bonus','duplicate','bot','owner',
+              'rate_limited','not_active','not_found','error')
+);

@@ -3,7 +3,7 @@ import { config } from "./config";
 
 const API = "https://api.lemonsqueezy.com/v1";
 
-export type CheckoutMode = "purchase" | "jump";
+export type CheckoutMode = "bid";
 
 export type CheckoutInput = {
   priceCents: number;
@@ -11,7 +11,6 @@ export type CheckoutInput = {
   expiresAt: Date;
   productName: string;
   mode: CheckoutMode;
-  clicks?: number;
 };
 
 function headers() {
@@ -24,11 +23,8 @@ function headers() {
 
 export async function createCheckout(input: CheckoutInput): Promise<string> {
   const { storeId, variantId } = config.lemonSqueezy;
-  const successUrl = `${config.siteUrl}/success?r=${input.intentId}`;
-  const description =
-    input.mode === "purchase"
-      ? `${input.productName} · ${input.clicks ?? 0} guaranteed clicks`
-      : `${input.productName} · queue jump`;
+  const successUrl = `${config.siteUrl}/?purchase=${input.intentId}`;
+  const description = `${input.productName} · permanent leaderboard bid`;
 
   const res = await fetch(`${API}/checkouts`, {
     method: "POST",
@@ -44,18 +40,16 @@ export async function createCheckout(input: CheckoutInput): Promise<string> {
               intent_id: input.intentId,
               mode: input.mode,
               // Lemon Squeezy requires every checkout_data.custom value to be a string.
-              click_quantity: String(input.clicks ?? 0),
               expected_amount_cents: String(input.priceCents),
             },
           },
           product_options: {
-            name: `Guaranteed clicks from ${config.siteName}`,
+            name: `YourHour leaderboard bid`,
             description,
             redirect_url: successUrl,
-            receipt_button_text: "See your campaign",
+            receipt_button_text: "See the leaderboard",
             receipt_link_url: successUrl,
-            receipt_thank_you_note:
-              "Your product stays in the queue until every purchased click is delivered or refunded.",
+            receipt_thank_you_note: "Your product stays permanently on the leaderboard. Completed bids are final.",
             enabled_variants: [Number(variantId)],
           },
         },
@@ -75,37 +69,6 @@ export async function createCheckout(input: CheckoutInput): Promise<string> {
   const url = json.data?.attributes?.url;
   if (!url) throw new Error("Lemon Squeezy returned no checkout URL");
   return url;
-}
-
-type OrderResponse = {
-  data?: { attributes?: { refunded_amount?: number } };
-};
-
-export async function getRefundedAmount(orderId: string): Promise<number> {
-  const res = await fetch(`${API}/orders/${encodeURIComponent(orderId)}`, { headers: headers() });
-  if (!res.ok) throw new Error(`Could not read Lemon Squeezy order ${orderId} (${res.status})`);
-  const json = (await res.json()) as OrderResponse;
-  return json.data?.attributes?.refunded_amount ?? 0;
-}
-
-export async function issueRefund(orderId: string, amountCents: number): Promise<number> {
-  const res = await fetch(`${API}/orders/${encodeURIComponent(orderId)}/refund`, {
-    method: "POST",
-    headers: headers(),
-    body: JSON.stringify({
-      data: {
-        type: "orders",
-        id: String(orderId),
-        attributes: { amount: amountCents },
-      },
-    }),
-  });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Lemon Squeezy refund failed (${res.status}): ${body.slice(0, 400)}`);
-  }
-  const json = (await res.json()) as OrderResponse;
-  return json.data?.attributes?.refunded_amount ?? amountCents;
 }
 
 export function verifyWebhookSignature(rawBody: string, signature: string | null): boolean {

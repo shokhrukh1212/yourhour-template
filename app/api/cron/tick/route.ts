@@ -5,7 +5,7 @@ import { runCampaignMaintenance } from "@/lib/delivery";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-/** Reconciles guarantees/refunds and refreshes the supply cap. Safe to retry. */
+/** Expires abandoned bids and retries durable analytics delivery. Safe to retry. */
 async function handle(request: Request) {
   if (!config.cronSecret) {
     return NextResponse.json({ error: "CRON_SECRET is not set" }, { status: 503 });

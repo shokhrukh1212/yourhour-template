@@ -4,16 +4,33 @@ export type UrlMetadata = {
   productName: string;
   pitch: string | null;
   imageUrl: string | null;
-  /**
-   * False when the page could not be read and productName is only a guess from the
-   * hostname. The claim panel uses this to decide whether to show editable name and
-   * pitch fields, so it must never be true on a fallback.
-   */
+  /** Whether the product page supplied readable HTML metadata. */
   scraped: boolean;
 };
 
 const FETCH_TIMEOUT_MS = 5000;
 const MAX_BYTES = 300_000;
+
+const PRODUCT_OVERRIDES: Record<string, { productName: string; pitch: string }> = {
+  "safeelephant.co.uk": {
+    productName: "Most expensive link",
+    pitch: "The most expensive link on the internet.",
+  },
+};
+
+// Used only when a page exposes no usable metadata. A complete, confident split is
+// required; otherwise the hostname is kept intact instead of inventing a bad name.
+const DOMAIN_WORDS = new Set([
+  "a", "ai", "app", "ask", "be", "best", "board", "book", "box", "build",
+  "buy", "can", "chat", "click", "cloud", "code", "daily", "data", "deal",
+  "design", "dev", "do", "docs", "easy", "find", "flow", "for", "get", "go",
+  "help", "home", "hour", "how", "hub", "in", "is", "it", "lab", "launch",
+  "link", "list", "live", "maker", "market", "meet", "my", "next", "note",
+  "now", "of", "on", "one", "page", "pay", "product", "screen", "shop",
+  "simple", "site", "space", "stack", "store", "studio", "task", "team", "the",
+  "time", "to", "tool", "top", "track", "up", "use", "war", "web", "what",
+  "where", "who", "why", "with", "work", "you", "your",
+]);
 
 function decodeEntities(value: string): string {
   return value
@@ -51,20 +68,61 @@ function clampName(name: string): string {
   return name.length > DISPLAY_NAME_MAX ? name.slice(0, DISPLAY_NAME_MAX).trim() : name;
 }
 
-function hostnameFallback(hostname: string): string {
-  const base = hostname.replace(/^www\./, "").split(".")[0] || hostname;
-  return base.charAt(0).toUpperCase() + base.slice(1);
+function titleCase(words: string[]): string {
+  const phrase = words.join(" ").toLowerCase();
+  return phrase.charAt(0).toUpperCase() + phrase.slice(1);
+}
+
+function splitKnownWords(value: string): string[] | null {
+  const best: Array<string[] | null> = Array(value.length + 1).fill(null);
+  best[0] = [];
+  for (let end = 1; end <= value.length; end += 1) {
+    for (let start = 0; start < end; start += 1) {
+      const prefix = best[start];
+      const word = value.slice(start, end);
+      if (!prefix || !DOMAIN_WORDS.has(word)) continue;
+      const candidate = [...prefix, word];
+      const current = best[end];
+      if (!current || candidate.length < current.length) best[end] = candidate;
+    }
+  }
+  const result = best[value.length];
+  return result && result.length > 1 ? result : null;
+}
+
+function knownDomainName(hostname: string): string | null {
+  const base = hostname.toLowerCase().replace(/^www\./, "").split(".")[0] ?? "";
+  const segmented = splitKnownWords(base);
+  return segmented ? titleCase(segmented) : null;
+}
+
+function polishMetadataName(name: string, hostname: string): string {
+  const base = hostname.toLowerCase().replace(/^www\./, "").split(".")[0] ?? "";
+  const compactName = name.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return compactName === base ? knownDomainName(hostname) ?? name : name;
+}
+
+export function hostnameFallback(hostname: string): string {
+  const cleanHostname = hostname.toLowerCase().replace(/^www\./, "");
+  const base = cleanHostname.split(".")[0] || cleanHostname;
+  const visibleParts = base
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .split(/[-_\s]+/)
+    .filter(Boolean);
+  if (visibleParts.length > 1) return titleCase(visibleParts);
+  const segmented = splitKnownWords(base);
+  return segmented ? titleCase(segmented) : cleanHostname;
 }
 
 function deriveProductName(html: string, hostname: string): string {
   const siteName = getMetaContent(html, "og:site_name");
-  if (siteName) return clampName(siteName);
+  if (siteName) return clampName(polishMetadataName(siteName, hostname));
 
   const title = getMetaContent(html, "og:title") ?? getTitle(html);
   if (title) {
     // Titles are often "Brand | Tagline" or "Brand - Tagline" — the brand is what we want.
     const segment = title.split(/\s+[|–—·-]\s+/)[0].trim();
-    if (segment) return clampName(segment);
+    if (segment) return clampName(polishMetadataName(segment, hostname));
   }
 
   return clampName(hostnameFallback(hostname));
@@ -101,6 +159,36 @@ function deriveImageUrl(html: string, pageUrl: string): string | null {
   }
 }
 
+function tagAttribute(tag: string, name: string): string | null {
+  const match = tag.match(new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i"));
+  const value = decodeEntities(match?.[1] ?? match?.[2] ?? match?.[3] ?? "").trim();
+  return value || null;
+}
+
+function deriveIconUrl(html: string, pageUrl: string): string | null {
+  const links = html.match(/<link\b[^>]*>/gi) ?? [];
+  const candidates = links.flatMap((tag) => {
+    const rel = tagAttribute(tag, "rel")?.toLowerCase().split(/\s+/) ?? [];
+    const href = tagAttribute(tag, "href");
+    if (!href) return [];
+    if (rel.includes("apple-touch-icon")) return [{ priority: 0, href }];
+    if (rel.includes("icon")) return [{ priority: 1, href }];
+    return [];
+  }).sort((a, b) => a.priority - b.priority);
+
+  for (const { href } of candidates) {
+    try {
+      const icon = new URL(href, pageUrl);
+      if (icon.protocol === "http:" || icon.protocol === "https:") return icon.toString();
+    } catch {}
+  }
+  return null;
+}
+
+export function productImageFromHtml(html: string, pageUrl: string): string | null {
+  return deriveIconUrl(html, pageUrl) ?? deriveImageUrl(html, pageUrl);
+}
+
 async function readLimited(res: Response, maxBytes: number): Promise<string> {
   const reader = res.body?.getReader();
   if (!reader) return res.text();
@@ -123,9 +211,10 @@ async function readLimited(res: Response, maxBytes: number): Promise<string> {
 /** Fetches the listing's landing page and derives a product name and pitch from it. */
 export async function fetchUrlMetadata(url: string): Promise<UrlMetadata> {
   const hostname = new URL(url).hostname;
+  const override = PRODUCT_OVERRIDES[hostname.replace(/^www\./, "").toLowerCase()];
   const fallback: UrlMetadata = {
-    productName: clampName(hostnameFallback(hostname)),
-    pitch: null,
+    productName: clampName(override?.productName ?? hostnameFallback(hostname)),
+    pitch: override?.pitch ?? null,
     imageUrl: null,
     scraped: false,
   };
@@ -148,9 +237,9 @@ export async function fetchUrlMetadata(url: string): Promise<UrlMetadata> {
 
     const html = await readLimited(res, MAX_BYTES);
     return {
-      productName: deriveProductName(html, hostname),
-      pitch: derivePitch(html),
-      imageUrl: deriveImageUrl(html, res.url || url),
+      productName: override?.productName ?? deriveProductName(html, hostname),
+      pitch: override?.pitch ?? derivePitch(html),
+      imageUrl: productImageFromHtml(html, res.url || url),
       scraped: true,
     };
   } catch {

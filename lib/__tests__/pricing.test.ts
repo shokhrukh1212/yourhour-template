@@ -1,37 +1,39 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { CLICK_RATE_CENTS, CLICK_STEP, DEFAULT_CHECKOUT_CLICKS, DEFAULT_CLICKS, MAX_CLICKS, MIN_CLICKS, MIN_ENTRY_CENTS, clickPackageForInput, formatPrice, jumpPrice, priceForClicks } from "../pricing";
+import { amountDueCents, isWholeDollarBid, nextBidCents, normalizeDollarInput, normalizeLegacyBidCents, settledBidCents } from "../pricing";
 
-test("click inventory has one fixed rate and exact boundaries", () => {
-  assert.equal(CLICK_RATE_CENTS, 20);
-  assert.equal(MIN_CLICKS, 25);
-  assert.equal(DEFAULT_CLICKS, 50);
-  assert.equal(DEFAULT_CHECKOUT_CLICKS, 100);
-  assert.equal(CLICK_STEP, 5);
-  assert.equal(MAX_CLICKS, 250);
-  assert.equal(MIN_ENTRY_CENTS, 500);
-  assert.equal(priceForClicks(25), 500);
-  assert.equal(priceForClicks(50), 1000);
-  assert.equal(priceForClicks(250), 5000);
+test("the empty board starts at $3 and every next bid adds one dollar", () => {
+  assert.equal(nextBidCents(null), 300);
+  assert.equal(nextBidCents(300), 400);
+  assert.equal(nextBidCents(1700), 1800);
 });
 
-test("package highlighting always agrees with the exact input", () => {
-  assert.equal(clickPackageForInput("50"), 50);
-  assert.equal(clickPackageForInput("200"), 200);
-  assert.equal(clickPackageForInput("250"), 250);
-  assert.equal(clickPackageForInput("25"), null);
-  assert.equal(clickPackageForInput(""), null);
-  assert.equal(clickPackageForInput("50.0"), null);
+test("legacy totals round up to whole dollars without rewriting them to the new-entry floor", () => {
+  assert.equal(normalizeLegacyBidCents(156), 200);
+  assert.equal(normalizeLegacyBidCents(470), 500);
+  assert.equal(normalizeLegacyBidCents(500), 500);
+  assert.equal(normalizeLegacyBidCents(501), 600);
 });
 
-test("money keeps meaningful cents and the minimum displays as $5", () => {
-  assert.equal(formatPrice(500), "$5");
-  assert.equal(formatPrice(1000), "$10");
-  assert.equal(formatPrice(5000), "$50");
+test("owners pay only the difference while new listings pay the full target", () => {
+  assert.equal(amountDueCents(null, 700), 700);
+  assert.equal(amountDueCents(500, 700), 200);
 });
 
-test("queue jumps start at $2 and rise one dollar above priority", () => {
-  assert.equal(jumpPrice(0), 200);
-  assert.equal(jumpPrice(200), 300);
-  assert.equal(jumpPrice(650), 750);
+test("a delayed payment keeps every paid dollar after a checkout race", () => {
+  assert.equal(settledBidCents(500,700,200),700);
+  assert.equal(settledBidCents(800,700,200),1000);
+});
+
+test("bids are bounded whole-dollar totals", () => {
+  assert.equal(isWholeDollarBid(300), true);
+  assert.equal(isWholeDollarBid(350), false);
+  assert.equal(isWholeDollarBid(200), false);
+});
+
+test("editable dollar values never retain a leading zero", () => {
+  assert.equal(normalizeDollarInput(""), "");
+  assert.equal(normalizeDollarInput("04"), "4");
+  assert.equal(normalizeDollarInput("00012"), "12");
+  assert.equal(normalizeDollarInput("4.5"), null);
 });

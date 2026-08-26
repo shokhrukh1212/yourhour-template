@@ -6,7 +6,9 @@ import { ensureVisitorId, VISITOR_COOKIE, visitorCookieOptions } from "@/lib/vis
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  if (new URL(request.url).searchParams.get("peek")) {
+  const requestUrl = new URL(request.url);
+  const isLocalPreview = requestUrl.hostname === "localhost" || requestUrl.hostname === "127.0.0.1";
+  if (requestUrl.searchParams.get("peek") || isLocalPreview) {
     return NextResponse.json(
       { visitors: await getVisitorTotal() },
       { headers: { "cache-control": "no-store" } },

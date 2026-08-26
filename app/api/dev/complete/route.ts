@@ -29,7 +29,7 @@ export async function GET(request: Request) {
     providerTestMode: true,
   });
   if (outcome.status === "applied" || outcome.status === "duplicate") {
-    return NextResponse.redirect(new URL(`/success?r=${intentId}`, request.url));
+    return NextResponse.redirect(new URL(`/?purchase=${intentId}`, request.url));
   }
   return NextResponse.json(outcome, { status: 409 });
 }

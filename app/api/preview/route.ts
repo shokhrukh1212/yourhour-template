@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { recordFunnelEvent } from "@/lib/analytics";
 import { fetchUrlMetadata } from "@/lib/metadata";
-import { campaignNameIsTaken, findCampaignByUrl, getCampaignById } from "@/lib/campaigns";
+import { findListingByUrl } from "@/lib/leaderboard";
 import { hashOwnerToken, ownerHashesMatch, ownerTokenFromRequest } from "@/lib/ownership";
 import { checkProductUrl } from "@/lib/validate";
 import { ensureVisitorId, VISITOR_COOKIE, visitorCookieOptions } from "@/lib/visitor-id";
@@ -42,23 +42,14 @@ export async function POST(request: Request) {
   });
 
   const meta = await fetchUrlMetadata(check.normalized);
-  const existing = await findCampaignByUrl(check.normalized);
-
-  // Only worth blocking on a name we actually read. A hostname guess colliding is not
-  // the buyer's fault, and they get editable fields to fix it.
-  if (!existing && meta.scraped && (await campaignNameIsTaken(meta.productName))) {
-    return NextResponse.json(
-      { error: "Someone is already listed as that product." },
-      { status: 409 },
-    );
-  }
+  const existing = await findListingByUrl(check.normalized);
 
   const token = ownerTokenFromRequest(request);
-  const protectedCampaign = existing ? await getCampaignById(existing.id) : null;
-  const owned = ownerHashesMatch(
-    protectedCampaign?.owner_token_hash ?? null,
+  // Legacy listings had no owner. Their first paid upgrade claims ownership.
+  const owned = Boolean(existing && (!existing.owner_token_hash || ownerHashesMatch(
+    existing.owner_token_hash,
     token ? hashOwnerToken(token) : null,
-  );
+  )));
   await recordFunnelEvent({
     name: "claim_opened",
     idempotencyKey: actionId,
@@ -73,7 +64,7 @@ export async function POST(request: Request) {
       pitch: meta.pitch,
       imageUrl: meta.imageUrl,
       scraped: meta.scraped,
-      existing,
+      existing: existing ? { id: existing.id, bidCents: existing.bid_cents } : null,
       owned,
     },
     { headers: { "cache-control": "no-store" } },

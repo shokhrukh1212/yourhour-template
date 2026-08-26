@@ -11,7 +11,6 @@ async function main() {
   await query(`DELETE FROM campaign_clicks`);
   await query(`DELETE FROM checkout_intents`);
   await query(`DELETE FROM campaigns`);
-  await query(`UPDATE site_config SET max_outstanding_clicks = 150, cap_recomputed_at = now() WHERE singleton = true`);
   console.log("campaigns after: 0");
   await getPool().end();
 }

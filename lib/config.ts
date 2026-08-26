@@ -9,7 +9,7 @@ export const config = {
   siteUrl: process.env.SITE_URL ?? "http://localhost:3000",
   siteName: process.env.SITE_NAME ?? "yourhour",
 
-  /** How long an unpaid checkout holds supply capacity. */
+  /** How long an unpaid bid checkout remains reusable. It never holds rank. */
   reservationMinutes: int("RESERVATION_MINUTES", 10),
 
   cronSecret: process.env.CRON_SECRET ?? "",
@@ -24,8 +24,7 @@ export const config = {
 
   vemetric: {
     token: process.env.VEMETRIC_TOKEN ?? "",
-    // The header's Stats link. Public by design, so it falls back to the live dashboard
-    // rather than disappearing when the variable is missing from an environment.
+    // Retained for the analytics integration; it is no longer linked in the header.
     publicDashboardUrl:
       process.env.VEMETRIC_PUBLIC_DASHBOARD_URL ??
       "https://app.vemetric.com/public/yourhour.com",

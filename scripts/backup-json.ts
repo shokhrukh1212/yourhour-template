@@ -1,8 +1,8 @@
 /**
  * Dumps every table to a timestamped JSON file before a migration.
  *
- * `npm run migrate` drops columns, and a dropped column is not recoverable. Run this
- * first. It is read-only -- it writes nothing to the database.
+ * Run this before the leaderboard migration so the guaranteed-click era remains
+ * recoverable independently from the in-database audit. It is read-only.
  *
  *   npx tsx --env-file=.env.local scripts/backup-json.ts
  *   npx tsx --env-file=.env.local scripts/backup-json.ts ./backups

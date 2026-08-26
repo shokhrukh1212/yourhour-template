@@ -1,15 +1,37 @@
 import type { Metadata } from "next";
 import Script from "next/script";
-import { Geist, Geist_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import { VemetricScript } from "@vemetric/react";
 import { config } from "@/lib/config";
 import "./globals.css";
 
-const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
-const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
+const publicSiteUrl = new URL("https://yourhour.lol");
+const socialTitle = "YourHour — One Product Owns the Homepage";
+const socialDescription =
+  "Pay $1 more to take #1. Every buyer stays permanently on the leaderboard, ranked by total paid.";
+const socialImage = {
+  url: "/og2.png",
+  width: 1200,
+  height: 631,
+  type: "image/png",
+  alt: "YourHour — One Product Owns the Homepage",
+};
+
+// Next ships these exact variable fonts with the installed package. Loading them
+// locally keeps production builds deterministic and avoids a Google Fonts request.
+const geistSans = localFont({
+  src: "../node_modules/next/dist/next-devtools/server/font/geist-latin.woff2",
+  variable: "--font-geist-sans",
+  weight: "100 900",
+});
+const geistMono = localFont({
+  src: "../node_modules/next/dist/next-devtools/server/font/geist-mono-latin.woff2",
+  variable: "--font-geist-mono",
+  weight: "100 900",
+});
 
 export const metadata: Metadata = {
-  metadataBase: new URL(config.siteUrl),
+  metadataBase: publicSiteUrl,
   // No `icons` here on purpose. Declaring one pins the tag to a bare "/icon.svg", and a
   // browser that has already cached a favicon under that exact URL keeps showing the old
   // artwork forever. Left alone, the app/icon.svg file convention emits the same file
@@ -17,30 +39,27 @@ export const metadata: Metadata = {
   // updates. Whenever the logo changes, change components/Logo.tsx and app/icon.svg
   // together -- they are the same mark drawn twice.
   title: {
-    default: "yourhour — feature your product, pay only for valid visits",
-    template: "%s · yourhour",
+    default: socialTitle,
+    template: "%s · YourHour",
   },
-  description:
-    "Feature your product on the yourhour homepage and pay only for valid visits. 20¢ per visit, counted transparently, with any unused balance refunded after seven days.",
+  description: socialDescription,
+  alternates: {
+    canonical: "/",
+  },
   openGraph: {
     type: "website",
-    siteName: "yourhour",
-    url: config.siteUrl,
-    title: "yourhour — feature your product, pay only for valid visits",
-    description:
-      "Feature your product. Pay only for valid visits — 20¢ each, unused balance refunded.",
-    images: [
-      {
-        url: "/og.png",
-        width: 1729,
-        height: 910,
-        alt: "yourhour.lol — feature your product, pay only for valid visits",
-      },
-    ],
+    siteName: "YourHour",
+    locale: "en_US",
+    url: "/",
+    title: socialTitle,
+    description: socialDescription,
+    images: [socialImage],
   },
   twitter: {
     card: "summary_large_image",
-    images: ["/og.png"],
+    title: socialTitle,
+    description: socialDescription,
+    images: [socialImage],
   },
 };
 
