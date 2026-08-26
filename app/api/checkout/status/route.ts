@@ -11,9 +11,10 @@ export async function GET(request: Request) {
     status: string; expected_amount_cents: number; target_bid_cents: number | null;
     owner_token_hash: string | null; campaign_id: string | null; product_name: string | null;
     bid_cents: number | null; rank: number | null;
+    provider_total_cents: number | null; ls_order_id: string | null;
   }>(
     `SELECT i.status, i.expected_amount_cents, i.target_bid_cents, i.owner_token_hash,
-            i.campaign_id::text, c.product_name, c.bid_cents,
+            i.campaign_id::text, i.provider_total_cents, i.ls_order_id, c.product_name, c.bid_cents,
             CASE WHEN c.id IS NULL THEN NULL ELSE (
               SELECT count(*)::int + 1 FROM campaigns ahead
                WHERE ahead.bid_cents > c.bid_cents
@@ -32,5 +33,10 @@ export async function GET(request: Request) {
     listingId: row.campaign_id, productName: row.product_name,
     targetBidCents: row.target_bid_cents, amountChargedCents: row.expected_amount_cents,
     bidCents: row.bid_cents, rank: row.rank,
+    // Only set once the payment provider's webhook verified the charge. The browser
+    // reports the Meta Purchase conversion from these two fields, so they must come
+    // from what was actually paid -- never from what the buyer asked to pay.
+    orderId: row.ls_order_id,
+    amountPaidCents: row.provider_total_cents ?? (row.status === "completed" ? row.expected_amount_cents : null),
   }, { headers: { "cache-control": "no-store" } });
 }

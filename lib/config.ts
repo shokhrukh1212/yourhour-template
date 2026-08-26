@@ -30,6 +30,11 @@ export const config = {
       "https://app.vemetric.com/public/yourhour.com",
   },
 
+  metaPixel: {
+    // Not a secret -- it ships inside the browser tag.
+    id: process.env.NEXT_PUBLIC_META_PIXEL_ID ?? "",
+  },
+
   xPixel: {
     // Not a secret -- it ships inside the browser tag.
     id: process.env.NEXT_PUBLIC_X_PIXEL_ID ?? "",

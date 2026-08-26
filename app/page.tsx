@@ -3,6 +3,7 @@ import { ClaimPanel } from "@/components/ClaimPanel";
 import { EmptyHero } from "@/components/EmptyHero";
 import { FeaturedProduct, type DisplayListing } from "@/components/FeaturedProduct";
 import { Leaderboard } from "@/components/Leaderboard";
+import { MetaViewContent } from "@/components/MetaViewContent";
 import { MobileClaimBar } from "@/components/MobileClaimBar";
 import { PurchaseStatus } from "@/components/PurchaseStatus";
 import { SiteHeader } from "@/components/SiteHeader";
@@ -35,7 +36,13 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ p
       <PurchaseStatus intentId={/^[0-9a-f-]{36}$/i.test(params.purchase ?? "") ? params.purchase! : null} />
       <BidProvider initialBidCents={initialBid} existingBids={existingBids}>
         <div className="site-shell page-content">
-          {top ? <section className="top-grid"><FeaturedProduct listing={display(top)} /><ClaimPanel /></section> : <EmptyHero />}
+          {top ? (
+            <section className="top-grid">
+              <MetaViewContent valueCents={minimum} />
+              <FeaturedProduct listing={display(top)} />
+              <ClaimPanel />
+            </section>
+          ) : <EmptyHero />}
           <Leaderboard initial={rows.map(display)} total={summary.count} />
         </div>
         {top ? <MobileClaimBar /> : null}

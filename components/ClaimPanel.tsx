@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useBid } from "@/components/BidProvider";
+import { initiateCheckoutEvent, trackMetaEvent } from "@/lib/meta-pixel";
 import { normalizeDollarInput, STARTING_BID_CENTS } from "@/lib/pricing";
 import { checkProductUrl } from "@/lib/validate";
 
@@ -60,8 +61,13 @@ export function ClaimPanel({ empty = false }: { empty?: boolean }) {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ url: product.url, targetBidCents: target, twclid: params.get("twclid") || undefined }),
       });
-      const json = await response.json() as { checkoutUrl?: string; error?: string };
+      const json = await response.json() as { checkoutUrl?: string; intentId?: string; amountDueCents?: number; error?: string };
       if (!response.ok || !json.checkoutUrl) throw new Error(json.error ?? "Could not start checkout.");
+      // Only once the server handed back a real checkout session: a rejected or failed
+      // reservation throws above and reports nothing. The intent id keys the event, so
+      // a reused checkout repeats one eventID instead of counting twice.
+      const started = initiateCheckoutEvent(json, target);
+      if (started) trackMetaEvent(started);
       window.location.assign(json.checkoutUrl);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not start checkout.");
