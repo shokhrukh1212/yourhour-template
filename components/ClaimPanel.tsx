@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useBid } from "@/components/BidProvider";
 import { initiateCheckoutEvent, trackMetaEvent } from "@/lib/meta-pixel";
 import { normalizeDollarInput, STARTING_BID_CENTS } from "@/lib/pricing";
+import { focusClaimForm } from "@/lib/scroll-to-claim";
 import { checkProductUrl } from "@/lib/validate";
 
 type Preview = {
@@ -12,12 +13,15 @@ type Preview = {
 
 export function ClaimPanel({ empty = false }: { empty?: boolean }) {
   const [url, setUrl] = useState("");
-  const { bidCents, rank, setBidCents } = useBid();
+  const { bidCents, minBidCents, rank, setBidCents } = useBid();
   const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const lastPreviewUrl = useRef("");
-  const effectiveMinimum = preview?.existing ? preview.existing.bidCents + 100 : STARTING_BID_CENTS;
+  const effectiveMinimum = Math.max(
+    STARTING_BID_CENTS,
+    preview?.existing ? preview.existing.bidCents + 100 : minBidCents,
+  );
   const dollars = bidCents / 100;
   const [bidDraft, setBidDraft] = useState({ value: String(dollars), bidCents });
   const bidInput = bidDraft.bidCents === bidCents ? bidDraft.value : String(dollars);
@@ -38,11 +42,18 @@ export function ClaimPanel({ empty = false }: { empty?: boolean }) {
     };
   }, []);
 
+  useEffect(() => {
+    setBidCents((current) => Math.max(current, effectiveMinimum));
+  }, [effectiveMinimum, setBidCents]);
+
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (busy) return;
+    // An empty field is not a mistake worth reporting: put the caret in it so the
+    // buyer can just start typing, which is what every other "Take #N" button does.
+    if (!url.trim()) { focusClaimForm(); return; }
     const checked = checkProductUrl(url);
-    if (!checked.ok) { setError(checked.error); return; }
+    if (!checked.ok) { setError(checked.error); focusClaimForm(); return; }
     setBusy(true); setError(null);
     try {
       let product = preview;
@@ -55,7 +66,11 @@ export function ClaimPanel({ empty = false }: { empty?: boolean }) {
         const nextMinimum = json.existing ? json.existing.bidCents + 100 : STARTING_BID_CENTS;
         setBidCents((value) => Math.max(value, nextMinimum));
       }
-      const target = Math.max(bidCents, product.existing ? product.existing.bidCents + 100 : STARTING_BID_CENTS);
+      const target = Math.max(
+        bidCents,
+        minBidCents,
+        product.existing ? product.existing.bidCents + 100 : STARTING_BID_CENTS,
+      );
       const params = new URLSearchParams(window.location.search);
       const response = await fetch("/api/checkout", {
         method: "POST", headers: { "content-type": "application/json" },
@@ -81,7 +96,7 @@ export function ClaimPanel({ empty = false }: { empty?: boolean }) {
     if (normalized === null) return;
     const nextBidCents = normalized === "" ? bidCents : Number(normalized) * 100;
     setBidDraft({ value: normalized, bidCents: nextBidCents });
-    if (normalized !== "") setBidCents(nextBidCents);
+    if (normalized !== "" && nextBidCents >= effectiveMinimum) setBidCents(nextBidCents);
     setError(null);
   }
   function onAmountBlur() {
@@ -91,17 +106,19 @@ export function ClaimPanel({ empty = false }: { empty?: boolean }) {
   }
 
   const label = rank === 1 && empty ? `Claim #1 for $${dollars}` : `Take #${rank} for $${dollars}`;
+  const atMinimum = bidCents <= effectiveMinimum;
+  const errorId = "product-url-error";
   return (
     <form id="claim" className={`claim-panel ${empty ? "empty-claim" : ""}`} onSubmit={submit} noValidate>
       {!empty ? <><h2>Take the homepage</h2><p className="claim-intro">Pay $1 more to take the homepage.</p></> : null}
       <label htmlFor="product-url">Product URL</label>
-      <input id="product-url" type="text" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="url" placeholder="name.com or https://name.com" value={url} onChange={(event) => { setUrl(event.target.value); setPreview(null); setError(null); }} />
+      <input id="product-url" type="text" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="url" placeholder="name.com or https://name.com" value={url} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} onChange={(event) => { setUrl(event.target.value); setPreview(null); setError(null); }} />
       <div className="bid-row">
-        <button type="button" className="stepper-btn" aria-label="Decrease amount by one dollar" disabled={bidCents <= effectiveMinimum} onClick={() => step(-100)}>−</button>
+        <button type="button" className="stepper-btn" aria-label={atMinimum ? `Minimum bid reached at $${effectiveMinimum / 100}; amount cannot be decreased` : "Decrease amount by one dollar"} disabled={atMinimum} onClick={() => step(-100)}>−</button>
         <div className="bid-amount"><span aria-hidden="true">$</span><input aria-label="Amount in dollars" type="text" inputMode="numeric" pattern="[0-9]*" value={bidInput} style={{ width: `${Math.max(1, bidInput.length)}ch` }} onChange={onAmountChange} onBlur={onAmountBlur} /></div>
         <button type="button" className="stepper-btn" aria-label="Increase amount by one dollar" onClick={() => step(100)}>+</button>
       </div>
-      {error ? <p className="form-error" role="alert">{error}</p> : null}
+      {error ? <p id={errorId} className="form-error" role="alert">{error}</p> : null}
       <button className="claim-button" type="submit" disabled={busy}>{busy ? "Preparing checkout…" : label}</button>
     </form>
   );

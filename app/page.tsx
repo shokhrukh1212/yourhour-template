@@ -34,7 +34,12 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ p
     <main className="site-page">
       <SiteHeader initialVisitors={visitorTotal} />
       <PurchaseStatus intentId={/^[0-9a-f-]{36}$/i.test(params.purchase ?? "") ? params.purchase! : null} />
-      <BidProvider initialBidCents={initialBid} existingBids={existingBids}>
+      <BidProvider
+        initialBidCents={initialBid}
+        initialMinimumBidCents={minimum}
+        initialTopId={top?.id ?? null}
+        existingBids={existingBids}
+      >
         <div className="site-shell page-content">
           {top ? (
             <section className="top-grid">

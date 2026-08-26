@@ -2,24 +2,50 @@
 
 import { useEffect, useState } from "react";
 import { useBid } from "@/components/BidProvider";
-import { focusClaimForm } from "@/lib/scroll-to-claim";
 
 /** Mobile-only sticky CTA that mirrors the claim form's submit button once it scrolls out of view. */
 export function MobileClaimBar() {
-  const [visible, setVisible] = useState(false);
-  const { bidCents, rank } = useBid();
+  const [passedClaim, setPassedClaim] = useState(false);
+  const [overlayOpen, setOverlayOpen] = useState(false);
+  const { chooseTopBid, topMinimumBidCents } = useBid();
 
   useEffect(() => {
     const form = document.getElementById("claim");
     if (!form) return;
-    const observer = new IntersectionObserver(([entry]) => setVisible(!entry.isIntersecting), { threshold: 0 });
+    const observer = new IntersectionObserver(([entry]) => {
+      setPassedClaim(!entry.isIntersecting && entry.boundingClientRect.bottom <= 0);
+    }, { threshold: 0 });
     observer.observe(form);
     return () => observer.disconnect();
   }, []);
 
+  useEffect(() => {
+    const readOverlayState = () => setOverlayOpen(Boolean(document.querySelector(
+      '.menu-button[aria-expanded="true"], dialog[open], [role="dialog"][aria-modal="true"]',
+    )));
+    readOverlayState();
+    const observer = new MutationObserver(readOverlayState);
+    observer.observe(document.body, {
+      attributes: true,
+      attributeFilter: ["aria-expanded", "aria-modal", "open"],
+      childList: true,
+      subtree: true,
+    });
+    return () => observer.disconnect();
+  }, []);
+
+  const visible = passedClaim && !overlayOpen;
+
   return (
-    <button type="button" className={`mobile-claim-bar${visible ? " is-visible" : ""}`} onClick={focusClaimForm}>
-      Take #{rank} for ${bidCents / 100}
+    <button
+      type="button"
+      className={`mobile-claim-bar${visible ? " is-visible" : ""}`}
+      aria-controls="product-url"
+      aria-hidden={!visible}
+      tabIndex={visible ? 0 : -1}
+      onClick={() => { setPassedClaim(false); chooseTopBid(); }}
+    >
+      Take #1 for ${topMinimumBidCents / 100}
     </button>
   );
 }
