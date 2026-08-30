@@ -6,6 +6,7 @@ import { initiateCheckoutEvent, trackMetaEvent } from "@/lib/meta-pixel";
 import { normalizeDollarInput, STARTING_BID_CENTS } from "@/lib/pricing";
 import { focusClaimForm } from "@/lib/scroll-to-claim";
 import { checkProductUrl } from "@/lib/validate";
+import { useOvertake } from "./OvertakeProvider";
 
 type Preview = {
   url: string; owned: boolean; existing: { id: string; bidCents: number } | null;
@@ -18,6 +19,9 @@ export function ClaimPanel({ empty = false }: { empty?: boolean }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const lastPreviewUrl = useRef("");
+  const amountRef = useRef<HTMLDivElement>(null);
+  const previousBidRef = useRef(bidCents);
+  const takeover = useOvertake();
   const effectiveMinimum = Math.max(
     STARTING_BID_CENTS,
     preview?.existing ? preview.existing.bidCents + 100 : minBidCents,
@@ -45,6 +49,20 @@ export function ClaimPanel({ empty = false }: { empty?: boolean }) {
   useEffect(() => {
     setBidCents((current) => Math.max(current, effectiveMinimum));
   }, [effectiveMinimum, setBidCents]);
+
+  useEffect(() => {
+    const previous = previousBidRef.current;
+    previousBidRef.current = bidCents;
+    const amount = amountRef.current;
+    if (previous === bidCents || !amount || document.visibilityState !== "visible"
+      || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const direction = bidCents > previous ? 1 : -1;
+    const animation = amount.animate([
+      { opacity: 0.35, transform: `translateY(${direction * 5}px)` },
+      { opacity: 1, transform: "translateY(0)" },
+    ], { duration: 170, easing: "cubic-bezier(.2,.75,.3,1)" });
+    return () => animation.cancel();
+  }, [bidCents]);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -107,19 +125,20 @@ export function ClaimPanel({ empty = false }: { empty?: boolean }) {
 
   const label = rank === 1 && empty ? `Claim #1 for $${dollars}` : `Take #${rank} for $${dollars}`;
   const atMinimum = bidCents <= effectiveMinimum;
+  const takeoverComplete = takeover.kind === "waiting" || takeover.kind === "takeover";
   const errorId = "product-url-error";
   return (
-    <form id="claim" className={`claim-panel ${empty ? "empty-claim" : ""}`} onSubmit={submit} noValidate>
+    <form id="claim" className={`claim-panel ${empty ? "empty-claim" : ""}${takeoverComplete ? " has-takeover-success" : ""}`} onSubmit={submit} noValidate>
       {!empty ? <><h2>Take the homepage</h2><p className="claim-intro">Pay $1 more to take the homepage.</p></> : null}
       <label htmlFor="product-url">Product URL</label>
       <input id="product-url" type="text" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="url" placeholder="name.com or https://name.com" value={url} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} onChange={(event) => { setUrl(event.target.value); setPreview(null); setError(null); }} />
       <div className="bid-row">
         <button type="button" className="stepper-btn" aria-label={atMinimum ? `Minimum bid reached at $${effectiveMinimum / 100}; amount cannot be decreased` : "Decrease amount by one dollar"} disabled={atMinimum} onClick={() => step(-100)}>−</button>
-        <div className="bid-amount"><span aria-hidden="true">$</span><input aria-label="Amount in dollars" type="text" inputMode="numeric" pattern="[0-9]*" value={bidInput} style={{ width: `${Math.max(1, bidInput.length)}ch` }} onChange={onAmountChange} onBlur={onAmountBlur} /></div>
+        <div ref={amountRef} className="bid-amount"><span aria-hidden="true">$</span><input aria-label="Amount in dollars" type="text" inputMode="numeric" pattern="[0-9]*" value={bidInput} style={{ width: `${Math.max(1, bidInput.length)}ch` }} onChange={onAmountChange} onBlur={onAmountBlur} /></div>
         <button type="button" className="stepper-btn" aria-label="Increase amount by one dollar" onClick={() => step(100)}>+</button>
       </div>
       {error ? <p id={errorId} className="form-error" role="alert">{error}</p> : null}
-      <button className="claim-button" type="submit" disabled={busy}>{busy ? "Preparing checkout…" : label}</button>
+      <button className={`claim-button${takeoverComplete ? " takeover-complete" : ""}`} type="submit" disabled={busy || takeoverComplete}>{takeoverComplete ? "✓ Verified — you’re #1" : busy ? "Preparing checkout…" : label}</button>
     </form>
   );
 }

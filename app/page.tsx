@@ -5,6 +5,7 @@ import { FeaturedProduct, type DisplayListing } from "@/components/FeaturedProdu
 import { Leaderboard } from "@/components/Leaderboard";
 import { MetaViewContent } from "@/components/MetaViewContent";
 import { MobileClaimBar } from "@/components/MobileClaimBar";
+import { OvertakeProvider, OvertakeTrail } from "@/components/OvertakeProvider";
 import { PurchaseStatus } from "@/components/PurchaseStatus";
 import { SiteHeader } from "@/components/SiteHeader";
 import { getAllBidCents, getLeaderboard, getLeaderboardSummary, getTopListing } from "@/lib/leaderboard";
@@ -30,27 +31,31 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ p
   const requested = Number(params.target);
   const hasRequestedBid = Number.isSafeInteger(requested) && requested >= 300 && requested % 100 === 0;
   const initialBid = hasRequestedBid ? requested : minimum;
+  const purchaseIntent = /^[0-9a-f-]{36}$/i.test(params.purchase ?? "") ? params.purchase! : null;
   return (
     <main className="site-page">
       <SiteHeader initialVisitors={visitorTotal} />
-      <PurchaseStatus intentId={/^[0-9a-f-]{36}$/i.test(params.purchase ?? "") ? params.purchase! : null} />
       <BidProvider
         initialBidCents={initialBid}
         initialMinimumBidCents={minimum}
         initialTopId={top?.id ?? null}
         existingBids={existingBids}
       >
-        <div className="site-shell page-content">
-          {top ? (
-            <section className="top-grid">
-              <MetaViewContent valueCents={minimum} />
-              <FeaturedProduct listing={display(top)} />
-              <ClaimPanel />
-            </section>
-          ) : <EmptyHero />}
-          <Leaderboard initial={rows.map(display)} total={summary.count} />
-        </div>
-        {top ? <MobileClaimBar /> : null}
+        <OvertakeProvider topId={top?.id ?? null} topName={top?.product_name ?? null} hasPurchaseIntent={Boolean(purchaseIntent)}>
+          <PurchaseStatus intentId={purchaseIntent} />
+          <div className="site-shell page-content">
+            {top ? (
+              <section className="top-grid">
+                <MetaViewContent valueCents={minimum} />
+                <FeaturedProduct listing={display(top)} />
+                <ClaimPanel />
+                <OvertakeTrail />
+              </section>
+            ) : <EmptyHero />}
+            <Leaderboard initial={rows.map(display)} total={summary.count} />
+          </div>
+          {top ? <MobileClaimBar /> : null}
+        </OvertakeProvider>
       </BidProvider>
     </main>
   );

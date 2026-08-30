@@ -59,10 +59,10 @@ export function SiteHeader({ initialVisitors }: { initialVisitors: number }) {
       <div className="site-shell site-header-inner">
         <Link href="/" className="brand" aria-label="YourHour home"><Logo className="brand-mark" /><span>YourHour</span></Link>
         <p className="visitor-total"><strong>{visitors.toLocaleString()}</strong> visitors so far</p>
-        <nav className="desktop-nav" aria-label="Main navigation"><a href="#leaderboard">Leaderboard</a><Link href="/rules">Rules</Link></nav>
+        <nav className="desktop-nav" aria-label="Main navigation"><a href="#leaderboard">Leaderboard</a><Link href="/rules">Rules</Link><a className="nav-cta" href="https://bidindex.dev/submit" target="_blank" rel="noopener noreferrer">List on BidIndex — free ↗</a></nav>
         <button className="menu-button" type="button" aria-expanded={open} aria-controls="mobile-menu" aria-label="Toggle menu" onClick={() => setOpen((value) => !value)}><span /><span /><span /></button>
       </div>
-      {open ? <nav id="mobile-menu" className="mobile-nav" aria-label="Mobile navigation"><a href="#leaderboard" onClick={() => setOpen(false)}>Leaderboard</a><Link href="/rules" onClick={() => setOpen(false)}>Rules</Link></nav> : null}
+      {open ? <nav id="mobile-menu" className="mobile-nav" aria-label="Mobile navigation"><a href="#leaderboard" onClick={() => setOpen(false)}>Leaderboard</a><Link href="/rules" onClick={() => setOpen(false)}>Rules</Link><a className="nav-cta" href="https://bidindex.dev/submit" target="_blank" rel="noopener noreferrer" onClick={() => setOpen(false)}>BidIndex ↗</a></nav> : null}
     </header>
   );
 }

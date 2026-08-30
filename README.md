@@ -1,6 +1,6 @@
 # YourHour
 
-YourHour is a permanent product leaderboard. The highest bidder owns the homepage; every completed buyer remains listed forever.
+YourHour is a permanent product leaderboard. Pay less, get more: #1 takes the homepage, and every completed buyer remains listed forever.
 
 ## Product model
 

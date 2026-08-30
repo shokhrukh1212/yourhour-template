@@ -8,15 +8,15 @@ import { config } from "@/lib/config";
 import "./globals.css";
 
 const publicSiteUrl = new URL("https://yourhour.lol");
-const socialTitle = "YourHour — One Product Owns the Homepage";
+const socialTitle = "YourHour — Pay less, Get more";
 const socialDescription =
-  "Pay $1 more to take #1. Every buyer stays permanently on the leaderboard, ranked by total paid.";
+  "Pay less, Get more. #1 takes the homepage. Every buyer stays permanently on the leaderboard, ranked by total paid.";
 const socialImage = {
-  url: "/og2.png",
+  url: "/og.png",
   width: 1200,
-  height: 631,
+  height: 630,
   type: "image/png",
-  alt: "YourHour — One Product Owns the Homepage",
+  alt: "YourHour — Pay less, Get more. #1 takes the homepage",
 };
 
 // Next ships these exact variable fonts with the installed package. Loading them

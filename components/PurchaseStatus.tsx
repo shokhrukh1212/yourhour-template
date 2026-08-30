@@ -2,13 +2,23 @@
 
 import { useEffect, useState } from "react";
 import { purchaseEvent, trackMetaEventOnce } from "@/lib/meta-pixel";
+import { useOvertake } from "./OvertakeProvider";
+
+function removePurchaseLookupFromUrl(): void {
+  const clean = new URL(window.location.href);
+  clean.searchParams.delete("purchase");
+  window.history.replaceState(window.history.state, "", `${clean.pathname}${clean.search}${clean.hash}`);
+}
 
 export function PurchaseStatus({ intentId }: { intentId: string | null }) {
   const [message, setMessage] = useState(intentId ? "Confirming your payment…" : null);
   const [done, setDone] = useState(false);
+  const { beginVerifiedTakeover } = useOvertake();
   useEffect(() => {
     if (!intentId) return;
-    let stopped = false; let attempts = 0;
+    let stopped = false;
+    let attempts = 0;
+    let timer: number | null = null;
     async function poll() {
       attempts += 1;
       try {
@@ -16,6 +26,7 @@ export function PurchaseStatus({ intentId }: { intentId: string | null }) {
         const json = await response.json() as {
           ready?: boolean; status?: string; productName?: string; rank?: number;
           orderId?: string | null; amountPaidCents?: number | null;
+          listingId?: string | null; bidCents?: number | null;
         };
         if (stopped) return;
         if (json.ready) {
@@ -25,19 +36,32 @@ export function PurchaseStatus({ intentId }: { intentId: string | null }) {
           // refresh, a re-render or a second tab on this URL cannot recount it.
           const purchase = purchaseEvent(json, intentId);
           if (purchase) trackMetaEventOnce(`Purchase:${purchase.eventId}`, purchase);
-          setMessage(`${json.productName ?? "Your product"} is now #${json.rank ?? "—"} on the leaderboard.`); setDone(true);
-          const clean = new URL(window.location.href); clean.searchParams.delete("purchase"); clean.hash = "leaderboard";
-          window.setTimeout(() => window.location.replace(clean), 900);
+          beginVerifiedTakeover(json);
+          setMessage(json.rank === 1
+            ? "You’re #1. Your product is now featured."
+            : `${json.productName ?? "Your product"} is now #${json.rank ?? "—"} on the leaderboard.`);
+          setDone(true);
+          removePurchaseLookupFromUrl();
           return;
         }
-        if (json.status === "expired") { setMessage("This checkout expired before payment completed."); setDone(true); return; }
+        if (["expired", "cancelled", "failed"].includes(json.status ?? "")) {
+          setMessage(json.status === "expired"
+            ? "This checkout expired before payment completed."
+            : "Payment was not completed. Your leaderboard position has not changed.");
+          setDone(true);
+          removePurchaseLookupFromUrl();
+          return;
+        }
       } catch { /* polling is best effort */ }
-      if (!stopped && attempts < 20) window.setTimeout(poll, 1500);
+      if (!stopped && attempts < 20) timer = window.setTimeout(poll, 1500);
       else if (!stopped) setMessage("Payment is still processing. Refresh this page in a moment.");
     }
     void poll();
-    return () => { stopped = true; };
-  }, [intentId]);
+    return () => {
+      stopped = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [beginVerifiedTakeover, intentId]);
   if (!message) return null;
-  return <div className={done ? "purchase-status done" : "purchase-status"} role="status">{message}</div>;
+  return <div className={done ? "purchase-status done" : "purchase-status"} role="status" aria-live="polite">{message}</div>;
 }
