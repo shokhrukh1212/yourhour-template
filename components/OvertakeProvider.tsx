@@ -68,14 +68,18 @@ export function OvertakeProvider({
   }, [topId]);
 
   const beginVerifiedTakeover = useCallback((result: CheckoutTakeoverStatus) => {
+    const replaceWithVerifiedBoard = () => {
+      const cleanRoute = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      startTransition(() => router.replace(cleanRoute, { scroll: false }));
+    };
     const candidate = verifiedTakeoverFromStatus(result);
     if (!candidate) {
-      if (result.ready && result.status === "completed") startTransition(() => router.refresh());
+      if (result.ready && result.status === "completed") replaceWithVerifiedBoard();
       return "ineligible" as const;
     }
 
     if (hasReplayedTakeover(candidate.transactionId)) {
-      startTransition(() => router.refresh());
+      replaceWithVerifiedBoard();
       return "replayed" as const;
     }
 
@@ -93,12 +97,12 @@ export function OvertakeProvider({
       const boardReady = new Promise<void>((resolve) => { resolveRefresh = resolve; });
       refreshResolvedRef.current = resolveRefresh;
       const transition = document.startViewTransition(async () => {
-        startTransition(() => router.refresh());
+        replaceWithVerifiedBoard();
         await boardReady;
       });
       void transition.finished.catch(() => {});
     } else {
-      startTransition(() => router.refresh());
+      replaceWithVerifiedBoard();
     }
     return "pending" as const;
   }, [clearTimers, router]);
@@ -143,7 +147,7 @@ export function OvertakeProvider({
   useEffect(() => {
     const previousTop = previousTopRef.current;
     previousTopRef.current = topId;
-    if (previousTop === topId || !topId || !previousTop) return;
+    if (previousTop === topId || !topId) return;
     const pending = verifiedTakeoverFromStatus(pendingResult);
     if (pending?.listingId === topId) return;
     if (motion.kind === "takeover" && motion.listingId === topId) return;

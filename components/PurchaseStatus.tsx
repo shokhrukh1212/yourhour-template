@@ -36,12 +36,14 @@ export function PurchaseStatus({ intentId }: { intentId: string | null }) {
           // refresh, a re-render or a second tab on this URL cannot recount it.
           const purchase = purchaseEvent(json, intentId);
           if (purchase) trackMetaEventOnce(`Purchase:${purchase.eventId}`, purchase);
+          // Clean the lookup before refreshing the RSC tree so Next's router state and
+          // the visible URL agree. The verified result is already in memory here.
+          removePurchaseLookupFromUrl();
           beginVerifiedTakeover(json);
           setMessage(json.rank === 1
             ? "You’re #1. Your product is now featured."
             : `${json.productName ?? "Your product"} is now #${json.rank ?? "—"} on the leaderboard.`);
           setDone(true);
-          removePurchaseLookupFromUrl();
           return;
         }
         if (["expired", "cancelled", "failed"].includes(json.status ?? "")) {
@@ -62,6 +64,11 @@ export function PurchaseStatus({ intentId }: { intentId: string | null }) {
       if (timer !== null) window.clearTimeout(timer);
     };
   }, [beginVerifiedTakeover, intentId]);
+  useEffect(() => {
+    if (!done) return;
+    const timer = window.setTimeout(() => setMessage(null), 6_000);
+    return () => window.clearTimeout(timer);
+  }, [done]);
   if (!message) return null;
   return <div className={done ? "purchase-status done" : "purchase-status"} role="status" aria-live="polite">{message}</div>;
 }

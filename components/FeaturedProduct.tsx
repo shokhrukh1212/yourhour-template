@@ -26,17 +26,27 @@ export function FeaturedProduct({ listing }: { listing: DisplayListing }) {
         introPlayedThisDocument = true;
         return;
       }
-      window.sessionStorage.setItem(FEATURED_INTRO_KEY, "1");
     } catch {
       // Continue with the document marker when sessionStorage is unavailable.
     }
-    introPlayedThisDocument = true;
-    if (document.visibilityState !== "visible" || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    const frame = window.requestAnimationFrame(() => setIntro(true));
-    const timer = window.setTimeout(() => setIntro(false), 700);
+    if (document.visibilityState !== "visible" || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      introPlayedThisDocument = true;
+      try { window.sessionStorage.setItem(FEATURED_INTRO_KEY, "1"); } catch { /* memory is enough */ }
+      return;
+    }
+    let timer: number | null = null;
+    // Store the marker only when the frame actually starts. In development React
+    // intentionally mounts, cleans up, and mounts effects again; marking before the
+    // first frame would consume the entrance while its cancelled frame never played.
+    const frame = window.requestAnimationFrame(() => {
+      introPlayedThisDocument = true;
+      try { window.sessionStorage.setItem(FEATURED_INTRO_KEY, "1"); } catch { /* memory is enough */ }
+      setIntro(true);
+      timer = window.setTimeout(() => setIntro(false), 700);
+    });
     return () => {
       window.cancelAnimationFrame(frame);
-      window.clearTimeout(timer);
+      if (timer !== null) window.clearTimeout(timer);
     };
   }, [motion.hasPurchaseIntent, motion.kind]);
 
@@ -54,6 +64,7 @@ export function FeaturedProduct({ listing }: { listing: DisplayListing }) {
     <article ref={cardRef} className={`featured-card${intro ? " is-initial-arrival" : ""}${motionClass}`} data-listing-id={listing.id}>
       <span className="featured-permanent-accent" aria-hidden="true" />
       <span className="featured-arrival-highlight" aria-hidden="true" />
+      <span className="featured-speed-sweep" aria-hidden="true" />
       <span className="featured-needle-accent" aria-hidden="true" />
       <div className="featured-watermark"><ProductLogo imageUrl={listing.iconUrl} productUrl={listing.url} productName={listing.productName} className="h-full w-full border-0" /></div>
       <div className="featured-product" data-featured-content><ProductLogo eager imageUrl={listing.iconUrl} productUrl={listing.url} productName={listing.productName} className="featured-logo" /><div className="featured-copy"><span className="featured-kicker">CURRENT #1</span><h1><a href={`/r/${listing.id}`} target="_blank" rel="noopener">{listing.productName}</a></h1>{listing.pitch ? <p>{listing.pitch}</p> : null}</div></div>

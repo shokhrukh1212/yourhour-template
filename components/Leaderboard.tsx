@@ -45,6 +45,21 @@ export function Leaderboard({ initial, total }: { initial: DisplayListing[]; tot
           easing: "cubic-bezier(.2,.78,.22,1)",
         });
         animationsRef.current.set(item.id, animation);
+      } else if (!reduced && visible && takeover.listingId === item.id
+        && (takeover.kind === "takeover" || (takeover.kind === "external" && !previousRect))) {
+        // A newly rendered winner has no previous rectangle to FLIP from. Give it the
+        // same short upward handoff so it does not simply pop into the first slot.
+        const mobile = window.matchMedia("(max-width: 768px)").matches;
+        const animation = row.animate([
+          { opacity: 0.45, transform: `translateY(${mobile ? 18 : 12}px)` },
+          { opacity: 1, transform: "translateY(0)" },
+        ], {
+          delay: takeover.kind === "takeover" ? (mobile ? 440 : 680) : 0,
+          duration: takeover.kind === "takeover" ? (mobile ? 440 : 560) : 420,
+          easing: "cubic-bezier(.2,.78,.22,1)",
+          fill: "both",
+        });
+        animationsRef.current.set(item.id, animation);
       }
 
       const previousRank = previousRanksRef.current.get(item.id);
