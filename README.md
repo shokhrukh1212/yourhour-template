@@ -27,7 +27,15 @@ npm run dev
 
 With Lemon Squeezy variables unset, checkout uses the local completion stub. The configured Lemon Squeezy variant must accept custom prices as low as $1 because an owner can buy a one-dollar upgrade. The webhook endpoint is `/api/webhooks/lemonsqueezy`.
 
-`/api/cron/tick` expires abandoned bid intents and retries durable analytics delivery. It does not promote campaigns, calculate capacity, or issue refunds.
+The homepage also has four temporary sponsored positions. Their 7-day and 30-day
+prices are configured with the server-only `SPONSOR_SLOT_{1..4}_PRICE_{7D|30D}_CENTS`
+variables and `SPONSOR_CURRENCY`. Sponsorship checkout uses the same Lemon Squeezy
+variant and verified webhook as leaderboard bids, but stores payments and click
+tracking separately and never changes homepage or leaderboard rank.
+
+`/api/cron/tick` expires abandoned bid intents and sponsorship reservations, expires
+ended sponsorships, and retries durable analytics delivery. It does not promote
+campaigns, calculate capacity, or issue refunds.
 
 ## Production migration
 

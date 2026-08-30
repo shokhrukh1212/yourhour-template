@@ -3,7 +3,7 @@ import { config } from "./config";
 
 const API = "https://api.lemonsqueezy.com/v1";
 
-export type CheckoutMode = "bid";
+export type CheckoutMode = "bid" | "sponsorship";
 
 export type CheckoutInput = {
   priceCents: number;
@@ -21,10 +21,17 @@ function headers() {
   };
 }
 
-export async function createCheckout(input: CheckoutInput): Promise<string> {
+type CreatedCheckout = { url: string; checkoutId: string | null };
+
+async function requestCheckout(input: CheckoutInput): Promise<CreatedCheckout> {
   const { storeId, variantId } = config.lemonSqueezy;
-  const successUrl = `${config.siteUrl}/?purchase=${input.intentId}`;
-  const description = `${input.productName} · permanent leaderboard bid`;
+  const sponsorship = input.mode === "sponsorship";
+  const successUrl = sponsorship
+    ? `${config.siteUrl}/?sponsorship=${input.intentId}`
+    : `${config.siteUrl}/?purchase=${input.intentId}`;
+  const description = sponsorship
+    ? `${input.productName} · temporary sponsored placement`
+    : `${input.productName} · permanent leaderboard bid`;
 
   const res = await fetch(`${API}/checkouts`, {
     method: "POST",
@@ -44,12 +51,14 @@ export async function createCheckout(input: CheckoutInput): Promise<string> {
             },
           },
           product_options: {
-            name: `YourHour leaderboard bid`,
+            name: sponsorship ? "YourHour sponsorship" : "YourHour leaderboard bid",
             description,
             redirect_url: successUrl,
-            receipt_button_text: "See the leaderboard",
+            receipt_button_text: sponsorship ? "See your sponsorship" : "See the leaderboard",
             receipt_link_url: successUrl,
-            receipt_thank_you_note: "Your product stays permanently on the leaderboard. Completed bids are final.",
+            receipt_thank_you_note: sponsorship
+              ? "Your placement starts after payment is verified. Sponsorship does not affect leaderboard rank."
+              : "Your product stays permanently on the leaderboard. Completed bids are final.",
             enabled_variants: [Number(variantId)],
           },
         },
@@ -65,10 +74,22 @@ export async function createCheckout(input: CheckoutInput): Promise<string> {
     const body = await res.text();
     throw new Error(`Lemon Squeezy checkout failed (${res.status}): ${body.slice(0, 400)}`);
   }
-  const json = (await res.json()) as { data?: { attributes?: { url?: string } } };
+  const json = (await res.json()) as { data?: { id?: string; attributes?: { url?: string } } };
   const url = json.data?.attributes?.url;
   if (!url) throw new Error("Lemon Squeezy returned no checkout URL");
-  return url;
+  return { url, checkoutId: json.data?.id ? String(json.data.id) : null };
+}
+
+export async function createCheckout(input: CheckoutInput): Promise<string> {
+  return (await requestCheckout(input)).url;
+}
+
+export async function createSponsorshipCheckout(
+  input: Omit<CheckoutInput, "mode">,
+): Promise<{ url: string; checkoutId: string }> {
+  const created = await requestCheckout({ ...input, mode: "sponsorship" });
+  if (!created.checkoutId) throw new Error("Lemon Squeezy returned no checkout ID");
+  return { url: created.url, checkoutId: created.checkoutId };
 }
 
 export function verifyWebhookSignature(rawBody: string, signature: string | null): boolean {

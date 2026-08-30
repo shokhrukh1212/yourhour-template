@@ -5,6 +5,7 @@ import test from "node:test";
 const schema = readFileSync(new URL("../schema.sql", import.meta.url), "utf8");
 const checkout = readFileSync(new URL("../../app/api/checkout/route.ts", import.meta.url), "utf8");
 const sale = readFileSync(new URL("../sale.ts", import.meta.url), "utf8");
+const sponsorshipSale = readFileSync(new URL("../sponsorship-sale.ts", import.meta.url), "utf8");
 
 test("migration archives exact legacy values before normalizing bids", () => {
   assert.match(schema, /leaderboard_migration_audits/);
@@ -65,4 +66,25 @@ test("payment completion is idempotent and determines rank", () => {
 test("verified clicks stay unique per product and visitor", () => {
   assert.match(schema, /campaign_clicks_campaign_visitor_idx\s+ON campaign_clicks \(campaign_id, visitor_id\)/);
   assert.match(schema, /outcome IN \('counted'/);
+});
+
+test("sponsorship positions have one pending or active owner", () => {
+  assert.match(schema, /CREATE TABLE IF NOT EXISTS sponsorships/);
+  assert.match(schema, /sponsorships_one_position_owner_idx/);
+  assert.match(schema, /status IN \('pending', 'active'\)/);
+  assert.match(schema, /sponsorships_position_status_idx/);
+  assert.match(schema, /sponsorships_active_dates_idx/);
+  assert.match(schema, /sponsorships_checkout_session_idx/);
+});
+
+test("sponsorship activation is provider-verified and idempotent", () => {
+  assert.match(schema, /provider_order_id\s+text UNIQUE/);
+  assert.match(sponsorshipSale, /WHERE provider_order_id = \$1/);
+  assert.match(sponsorshipSale, /SET status = 'active'/);
+  assert.match(sponsorshipSale, /make_interval\(days => duration_days\)/);
+});
+
+test("sponsorship clicks retain desktop or mobile placement", () => {
+  assert.match(schema, /sponsorship_click_events/);
+  assert.match(schema, /'sponsor_desktop','sponsor_mobile'/);
 });

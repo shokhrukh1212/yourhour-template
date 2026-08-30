@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { verifyWebhookSignature } from "@/lib/lemonsqueezy";
 import { applyPaidOrder } from "@/lib/sale";
+import { applyPaidSponsorshipOrder, disablePaidSponsorship } from "@/lib/sponsorship-sale";
 
 export const dynamic = "force-dynamic";
 
@@ -38,14 +39,22 @@ export async function POST(request: Request) {
   }
 
   const eventName = payload.meta?.event_name ?? request.headers.get("x-event-name");
-  if (eventName !== "order_created") {
-    // Acknowledge anything else so Lemon Squeezy stops retrying it.
-    return NextResponse.json({ ignored: eventName });
-  }
-
   const orderId = payload.data?.id;
   if (!orderId) {
     return NextResponse.json({ error: "missing order id" }, { status: 400 });
+  }
+
+  if (eventName === "order_refunded" || eventName === "order_cancelled") {
+    const disabled = await disablePaidSponsorship(
+      String(orderId),
+      eventName === "order_refunded" ? "refunded" : "cancelled",
+    );
+    return NextResponse.json({ disabled, eventName });
+  }
+
+  if (eventName !== "order_created") {
+    // Acknowledge anything else so Lemon Squeezy stops retrying it.
+    return NextResponse.json({ ignored: eventName });
   }
 
   const status = payload.data?.attributes?.status;
@@ -54,6 +63,16 @@ export async function POST(request: Request) {
   }
 
   try {
+    if (payload.meta?.custom_data?.mode === "sponsorship") {
+      const outcome = await applyPaidSponsorshipOrder({
+        orderId: String(orderId),
+        sponsorshipId: payload.meta.custom_data.intent_id ?? null,
+        providerSubtotalCents: payload.data?.attributes?.subtotal ?? 0,
+        providerTotalCents: payload.data?.attributes?.total ?? 0,
+        providerCurrency: payload.data?.attributes?.currency ?? "",
+      });
+      return NextResponse.json(outcome);
+    }
     const outcome = await applyPaidOrder({
       orderId: String(orderId),
       intentId: payload.meta?.custom_data?.intent_id ?? null,

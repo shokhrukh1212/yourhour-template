@@ -7,6 +7,7 @@ import { useBid } from "@/components/BidProvider";
 export function MobileClaimBar() {
   const [passedClaim, setPassedClaim] = useState(false);
   const [overlayOpen, setOverlayOpen] = useState(false);
+  const [sponsorDockVisible, setSponsorDockVisible] = useState(false);
   const { chooseTopBid, topMinimumBidCents } = useBid();
 
   useEffect(() => {
@@ -34,7 +35,15 @@ export function MobileClaimBar() {
     return () => observer.disconnect();
   }, []);
 
-  const visible = passedClaim && !overlayOpen;
+  useEffect(() => {
+    const update = (event: Event) => {
+      setSponsorDockVisible(Boolean((event as CustomEvent<{ visible?: boolean }>).detail?.visible));
+    };
+    window.addEventListener("yourhour:sponsor-dock", update);
+    return () => window.removeEventListener("yourhour:sponsor-dock", update);
+  }, []);
+
+  const visible = passedClaim && !overlayOpen && !sponsorDockVisible;
 
   return (
     <button

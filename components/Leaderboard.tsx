@@ -1,13 +1,13 @@
 "use client";
 
 import { useLayoutEffect, useRef, useState } from "react";
-import { useBid } from "@/components/BidProvider";
+// import { useBid } from "@/components/BidProvider"; // Restore with row bid controls below.
 import { ProductLogo } from "./ProductLogo";
 import type { DisplayListing } from "./FeaturedProduct";
 import { useOvertake } from "./OvertakeProvider";
 
 export function Leaderboard({ initial, total }: { initial: DisplayListing[]; total: number }) {
-  const { chooseBid } = useBid();
+  // const { chooseBid } = useBid(); // Restore with row bid controls below.
   const [loaded, setLoaded] = useState<DisplayListing[]>([]);
   const [loading, setLoading] = useState(false);
   const takeover = useOvertake();
@@ -97,22 +97,33 @@ export function Leaderboard({ initial, total }: { initial: DisplayListing[]; tot
             className={`${item.rank === 1 ? "leader-row winner" : "leader-row"}${motionClass}`}
             style={{ viewTransitionName: `leader-row-${item.id.replace(/[^a-zA-Z0-9_-]/g, "-")}` }}
           >
-          <div className="row-identity">
+          <a
+            className="leaderboard-row-link"
+            href={`/r/${item.id}`}
+            target="_blank"
+            rel="noopener"
+            aria-label={`Visit ${item.productName}, rank ${item.rank}, $${item.bidCents / 100} paid (opens in a new tab)`}
+          >
             <span className="rank">#{item.rank}</span>
-            <div className="row-product">
-              <ProductLogo imageUrl={item.iconUrl} productUrl={item.url} productName={item.productName} className="row-logo" />
-              <div className="row-copy"><h3><a href={`/r/${item.id}`} target="_blank" rel="noopener" aria-label={`Visit ${item.productName} (opens in a new tab)`}>{item.productName}</a></h3>{item.pitch ? <p>{item.pitch}</p> : null}</div>
-            </div>
-            <span className="row-clicks"><svg className="cursor-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" /><path d="M13 13l6 6" /></svg><b>{item.verifiedClicks.toLocaleString()}</b> <span>clicks</span></span>
+            <ProductLogo imageUrl={item.iconUrl} productUrl={item.url} productName={item.productName} className="row-logo" />
+            <span className="row-copy">
+              <h3>
+                <span className="row-title">{item.productName}</span>
+                <span className="row-title-clicks"><span aria-hidden="true">·</span> {item.verifiedClicks.toLocaleString()} clicks</span>
+              </h3>
+              {item.pitch ? <span className="row-description">{item.pitch}</span> : null}
+              <span className="row-mobile-clicks">{item.verifiedClicks.toLocaleString()} clicks</span>
+            </span>
             <strong className="row-paid">${item.bidCents / 100}</strong>
-          </div>
+          </a>
+          {/* Row controls are intentionally commented out for the simplified MVP.
           <div className="row-footer">
             <div className="row-actions">
               <a className="row-visit" href={`/r/${item.id}`} target="_blank" rel="noopener" aria-label={`Visit ${item.productName} (opens in a new tab)`}>Visit <span aria-hidden="true">↗</span></a>
-              {/* Beat button: hidden on mobile only (single-row layout) via .row-actions .beat in the max-width:768px block. Logic untouched — remove that rule to bring it back. */}
               <a className="beat" href={`/?target=${item.bidCents + 100}#claim`} aria-label={`Beat ${item.productName} for $${(item.bidCents + 100) / 100}`} onClick={(event) => { event.preventDefault(); chooseBid(item.bidCents + 100); }}>Beat for ${(item.bidCents + 100) / 100}</a>
             </div>
           </div>
+          */}
         </li>;})}
       </ol></div> : <div className="empty-board"><span aria-hidden="true">☷</span><h3>No products yet.</h3><p>The first buyer becomes #1.</p></div>}
       {items.length < total ? <button type="button" className="more-button" disabled={loading} onClick={more}><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m7 9.5 5 5 5-5" /></svg>{loading ? "Loading…" : "More products"}</button> : null}

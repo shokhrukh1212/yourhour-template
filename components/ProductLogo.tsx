@@ -28,7 +28,8 @@ export function ProductLogo({
 
   return (
     <span
-      aria-hidden="true"
+      role="img"
+      aria-label={`${productName?.trim() || "Product"} logo`}
       className={`grid shrink-0 place-items-center overflow-hidden border bg-background text-xs font-black ${size}`}
       style={{
         color,

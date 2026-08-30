@@ -12,6 +12,9 @@ export const config = {
   /** How long an unpaid bid checkout remains reusable. It never holds rank. */
   reservationMinutes: int("RESERVATION_MINUTES", 10),
 
+  /** How long an unpaid sponsorship checkout owns its selected position. */
+  sponsorReservationMinutes: int("SPONSOR_RESERVATION_MINUTES", 10),
+
   cronSecret: process.env.CRON_SECRET ?? "",
   ipHashSalt: process.env.IP_HASH_SALT ?? "dev-salt-change-me",
 

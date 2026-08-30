@@ -8,9 +8,11 @@ import { MobileClaimBar } from "@/components/MobileClaimBar";
 import { OvertakeProvider, OvertakeTrail } from "@/components/OvertakeProvider";
 import { PurchaseStatus } from "@/components/PurchaseStatus";
 import { SiteHeader } from "@/components/SiteHeader";
+import { SponsoredProducts, SponsorshipStatus } from "@/components/SponsoredProducts";
 import { getAllBidCents, getLeaderboard, getLeaderboardSummary, getTopListing } from "@/lib/leaderboard";
 import { nextBidCents } from "@/lib/pricing";
 import { getVisitorTotal } from "@/lib/visitors";
+import { getSponsorSlots } from "@/lib/sponsorship";
 
 export const dynamic = "force-dynamic";
 
@@ -18,20 +20,23 @@ function display(item: Awaited<ReturnType<typeof getTopListing>> & {}): DisplayL
   return { id: item.id, url: item.url, productName: item.product_name, pitch: item.pitch, iconUrl: item.icon_url, bidCents: item.bid_cents, verifiedClicks: item.verified_clicks, rank: item.rank };
 }
 
-export default async function Home({ searchParams }: { searchParams: Promise<{ purchase?: string; target?: string }> }) {
+export default async function Home({ searchParams }: { searchParams: Promise<{ purchase?: string; sponsorship?: string; target?: string }> }) {
   const params = await searchParams;
-  const [top, rows, summary, existingBids, visitorTotal] = await Promise.all([
+  const [top, rows, summary, existingBids, visitorTotal, sponsorSlots] = await Promise.all([
     getTopListing(),
     getLeaderboard(5),
     getLeaderboardSummary(),
     getAllBidCents(),
     getVisitorTotal(),
+    getSponsorSlots(),
   ]);
   const minimum = nextBidCents(top?.bid_cents ?? null);
   const requested = Number(params.target);
   const hasRequestedBid = Number.isSafeInteger(requested) && requested >= 300 && requested % 100 === 0;
   const initialBid = hasRequestedBid ? requested : minimum;
   const purchaseIntent = /^[0-9a-f-]{36}$/i.test(params.purchase ?? "") ? params.purchase! : null;
+  const sponsorshipIntent = /^[0-9a-f-]{36}$/i.test(params.sponsorship ?? "") ? params.sponsorship! : null;
+  const sponsorNow = new Date().toISOString();
   return (
     <main className="site-page">
       <SiteHeader initialVisitors={visitorTotal} />
@@ -43,16 +48,26 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ p
       >
         <OvertakeProvider topId={top?.id ?? null} topName={top?.product_name ?? null} hasPurchaseIntent={Boolean(purchaseIntent)}>
           <PurchaseStatus intentId={purchaseIntent} />
+          <SponsorshipStatus sponsorshipId={sponsorshipIntent} />
           <div className="site-shell page-content">
             {top ? (
-              <section className="top-grid">
+              <section className="homepage-grid top-grid">
                 <MetaViewContent valueCents={minimum} />
-                <FeaturedProduct listing={display(top)} />
-                <ClaimPanel />
+                <div className="homepage-featured"><FeaturedProduct listing={display(top)} /></div>
+                <aside className="homepage-rail" aria-label="Homepage promotion options">
+                  <ClaimPanel />
+                  <SponsoredProducts slots={sponsorSlots} nowIso={sponsorNow} suppressMobileDock={Boolean(purchaseIntent || sponsorshipIntent)} />
+                </aside>
+                <div className="homepage-leaderboard"><Leaderboard initial={rows.map(display)} total={summary.count} /></div>
                 <OvertakeTrail />
               </section>
-            ) : <EmptyHero />}
-            <Leaderboard initial={rows.map(display)} total={summary.count} />
+            ) : (
+              <>
+                <EmptyHero />
+                <SponsoredProducts slots={sponsorSlots} nowIso={sponsorNow} suppressMobileDock={Boolean(sponsorshipIntent)} />
+                <Leaderboard initial={rows.map(display)} total={summary.count} />
+              </>
+            )}
           </div>
           {top ? <MobileClaimBar /> : null}
         </OvertakeProvider>

@@ -579,3 +579,53 @@ ALTER TABLE campaign_click_events ADD CONSTRAINT campaign_click_events_outcome_c
   outcome IN ('counted','counted_guaranteed','counted_bonus','duplicate','bot','owner',
               'rate_limited','not_active','not_found','error')
 );
+
+-- Self-serve sponsorship MVP (2026-08-30). Sponsorships are intentionally separate
+-- from campaigns: they never affect the permanent leaderboard or homepage winner.
+CREATE TABLE IF NOT EXISTS sponsorships (
+  id                         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  position                   smallint NOT NULL CHECK (position BETWEEN 1 AND 4),
+  product_url                text NOT NULL,
+  product_name               text NOT NULL CHECK (char_length(product_name) BETWEEN 1 AND 80),
+  product_description        text CHECK (product_description IS NULL OR char_length(product_description) <= 160),
+  logo_url                   text,
+  duration_days              smallint NOT NULL CHECK (duration_days IN (7, 30)),
+  amount_paid_cents          integer NOT NULL CHECK (amount_paid_cents > 0),
+  currency                   text NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
+  status                     text NOT NULL DEFAULT 'pending'
+                               CHECK (status IN ('pending','active','expired','cancelled','refunded')),
+  checkout_session_id        text UNIQUE,
+  checkout_url               text,
+  provider_order_id          text UNIQUE,
+  reservation_expires_at     timestamptz NOT NULL,
+  starts_at                  timestamptz,
+  ends_at                    timestamptz,
+  click_count                integer NOT NULL DEFAULT 0 CHECK (click_count >= 0),
+  impression_count           integer NOT NULL DEFAULT 0 CHECK (impression_count >= 0),
+  created_at                 timestamptz NOT NULL DEFAULT now(),
+  updated_at                 timestamptz NOT NULL DEFAULT now(),
+  CHECK ((status <> 'active') OR (starts_at IS NOT NULL AND ends_at IS NOT NULL AND ends_at > starts_at))
+);
+
+CREATE INDEX IF NOT EXISTS sponsorships_position_status_idx
+  ON sponsorships (position, status);
+CREATE INDEX IF NOT EXISTS sponsorships_active_dates_idx
+  ON sponsorships (starts_at, ends_at) WHERE status = 'active';
+CREATE UNIQUE INDEX IF NOT EXISTS sponsorships_checkout_session_idx
+  ON sponsorships (checkout_session_id) WHERE checkout_session_id IS NOT NULL;
+-- Expiration is materialized before every availability read/reservation and by cron.
+-- This partial unique index is the final race-proof ownership gate.
+CREATE UNIQUE INDEX IF NOT EXISTS sponsorships_one_position_owner_idx
+  ON sponsorships (position) WHERE status IN ('pending', 'active');
+
+CREATE TABLE IF NOT EXISTS sponsorship_click_events (
+  id                bigserial PRIMARY KEY,
+  sponsorship_id    uuid NOT NULL REFERENCES sponsorships(id) ON DELETE CASCADE,
+  placement         text NOT NULL CHECK (placement IN ('sponsor_desktop','sponsor_mobile')),
+  ip_hash           text NOT NULL,
+  user_agent        text,
+  counted           boolean NOT NULL DEFAULT true,
+  created_at        timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS sponsorship_click_events_campaign_idx
+  ON sponsorship_click_events (sponsorship_id, created_at DESC);

@@ -1,5 +1,7 @@
 export const PITCH_MAX = 180;
 export const DISPLAY_NAME_MAX = 60;
+export const SPONSOR_NAME_MAX = 80;
+export const SPONSOR_DESCRIPTION_MAX = 160;
 
 const SOCIAL_HOSTS = new Set(["x.com","www.x.com","mobile.x.com","twitter.com","www.twitter.com","mobile.twitter.com"]);
 export type PurchaseAttribution = { utmSource: string | null; utmMedium: string | null; utmCampaign: string | null; utmContent: string | null; utmTerm: string | null; referrer: string | null };
@@ -30,6 +32,47 @@ function clampText(raw: unknown, max: number): string | null {
   const text = String(raw ?? "").trim().replace(/\s+/g," ");
   if (!text) return null;
   return text.length > max ? `${text.slice(0,max - 1).trimEnd()}…` : text;
+}
+
+export type SponsorshipCheckoutInput = {
+  position: 1 | 2 | 3 | 4;
+  durationDays: 7 | 30;
+  url: string;
+};
+
+export type SponsorshipValidationResult =
+  | { ok: true; value: SponsorshipCheckoutInput }
+  | { ok: false; error: string };
+
+export function sanitizeSponsorshipMetadata(productName: string, description: string | null) {
+  return {
+    productName: clampText(productName, SPONSOR_NAME_MAX),
+    description: clampText(description, SPONSOR_DESCRIPTION_MAX),
+  };
+}
+
+export function validateSponsorshipCheckout(body: unknown): SponsorshipValidationResult {
+  if (typeof body !== "object" || body === null) return { ok: false, error: "Invalid request." };
+  const raw = body as Record<string, unknown>;
+  if (typeof raw.url !== "string") return { ok: false, error: "Invalid product URL." };
+  const position = parseInteger(raw.position);
+  if (position === null || ![1, 2, 3, 4].includes(position)) {
+    return { ok: false, error: "Choose a valid sponsorship position." };
+  }
+  const durationDays = parseInteger(raw.durationDays);
+  if (durationDays !== 7 && durationDays !== 30) {
+    return { ok: false, error: "Choose a 7-day or 30-day sponsorship." };
+  }
+  const url = checkProductUrl(String(raw.url ?? ""));
+  if (!url.ok) return { ok: false, error: url.error };
+  return {
+    ok: true,
+    value: {
+      position: position as SponsorshipCheckoutInput["position"],
+      durationDays,
+      url: url.normalized,
+    },
+  };
 }
 function sanitizeTwclid(raw: unknown): string | null { const text = String(raw ?? "").trim(); return /^[A-Za-z0-9._-]{1,128}$/.test(text) ? text : null; }
 function attributionValue(raw: unknown, max = 200): string | null { const text = String(raw ?? "").trim(); return text ? text.slice(0,max) : null; }

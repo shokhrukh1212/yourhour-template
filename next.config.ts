@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // The development route badge can cover leaderboard text and the mobile sponsor
+  // dock at supported 320px layouts. Compile/runtime errors still use their overlay.
+  devIndicators: false,
   async redirects() {
     return [{ source: "/live", destination: "/", permanent: true }];
   },
