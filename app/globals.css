@@ -326,6 +326,7 @@ button,input { font:inherit; }
 .row-title-clicks { display:inline-flex; flex:0 0 auto; align-self:center; align-items:center; gap:5px; margin-left:8px; color:var(--muted); font-family:var(--font-geist-sans),ui-sans-serif,system-ui,sans-serif; font-size:13px; font-weight:520; line-height:1; }
 .row-description { display:-webkit-box; max-width:100%; margin-top:5px; overflow:hidden; color:var(--muted); font-size:13px; line-height:1.35; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
 .row-mobile-clicks { display:none; }
+.row-mobile-paid-ago { margin-left:12px; }
 .leaderboard-row-link .row-paid { justify-self:end; margin:0; padding:0; color:var(--navy); font-size:20px; font-weight:760; white-space:nowrap; }
 
 .sponsors-section { min-width:0; }

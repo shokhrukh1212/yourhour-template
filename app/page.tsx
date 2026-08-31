@@ -18,7 +18,7 @@ import { getSponsorSlots } from "@/lib/sponsorship";
 export const dynamic = "force-dynamic";
 
 function display(item: Awaited<ReturnType<typeof getTopListing>> & {}): DisplayListing {
-  return { id: item.id, url: item.url, productName: item.product_name, pitch: item.pitch, iconUrl: item.icon_url, bidCents: item.bid_cents, verifiedClicks: item.verified_clicks, rank: item.rank };
+  return { id: item.id, url: item.url, productName: item.product_name, pitch: item.pitch, iconUrl: item.icon_url, bidCents: item.bid_cents, verifiedClicks: item.verified_clicks, bidPlacedAt: new Date(item.bid_placed_at).toISOString(), rank: item.rank };
 }
 
 export default async function Home({ searchParams }: { searchParams: Promise<{ purchase?: string; sponsorship?: string; target?: string }> }) {
@@ -38,7 +38,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ p
   const initialBid = hasRequestedBid ? requested : minimum;
   const purchaseIntent = /^[0-9a-f-]{36}$/i.test(params.purchase ?? "") ? params.purchase! : null;
   const sponsorshipIntent = /^[0-9a-f-]{36}$/i.test(params.sponsorship ?? "") ? params.sponsorship! : null;
-  const sponsorNow = new Date().toISOString();
+  const nowIso = new Date().toISOString();
   return (
     <main className="site-page">
       <SiteHeader initialVisitors={visitorTotal} initialWatching={watchingNow} />
@@ -58,16 +58,16 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ p
                 <div className="homepage-featured"><FeaturedProduct listing={display(top)} /></div>
                 <div className="homepage-claim"><ClaimPanel /></div>
                 <div className="homepage-sponsors">
-                  <SponsoredProducts slots={sponsorSlots} nowIso={sponsorNow} suppressMobileDock={Boolean(purchaseIntent || sponsorshipIntent)} />
+                  <SponsoredProducts slots={sponsorSlots} nowIso={nowIso} suppressMobileDock={Boolean(purchaseIntent || sponsorshipIntent)} />
                 </div>
-                <div className="homepage-leaderboard"><Leaderboard initial={rows.map(display)} total={summary.count} /></div>
+                <div className="homepage-leaderboard"><Leaderboard initial={rows.map(display)} total={summary.count} nowIso={nowIso} /></div>
                 <OvertakeTrail />
               </section>
             ) : (
               <>
                 <EmptyHero />
-                <SponsoredProducts slots={sponsorSlots} nowIso={sponsorNow} suppressMobileDock={Boolean(sponsorshipIntent)} />
-                <Leaderboard initial={rows.map(display)} total={summary.count} />
+                <SponsoredProducts slots={sponsorSlots} nowIso={nowIso} suppressMobileDock={Boolean(sponsorshipIntent)} />
+                <Leaderboard initial={rows.map(display)} total={summary.count} nowIso={nowIso} />
               </>
             )}
           </div>

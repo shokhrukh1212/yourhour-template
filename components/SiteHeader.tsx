@@ -71,7 +71,7 @@ export function SiteHeader({
         <Link href="/" className="brand" aria-label="YourHour home"><Logo className="brand-mark" /><span>YourHour</span></Link>
         <div className="header-stats">
           <p className="visitor-total"><strong>{visitors.toLocaleString()}</strong> visitors so far</p>
-          {watching === null ? null : (
+          {watching === null || watching === 0 ? null : (
             <p className="watching-now" aria-label={`${watching} watching right now`}>
               <strong><span className="live-dot" aria-hidden="true" />{watching.toLocaleString()}</strong> watching
             </p>

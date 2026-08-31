@@ -1,12 +1,13 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 // import { useBid } from "@/components/BidProvider"; // Restore with row bid controls below.
 import { ProductLogo } from "./ProductLogo";
 import type { DisplayListing } from "./FeaturedProduct";
 import { useOvertake } from "./OvertakeProvider";
+import { formatRelativeTime, relativeTimeRefreshMs } from "@/lib/relative-time";
 
-export function Leaderboard({ initial, total }: { initial: DisplayListing[]; total: number }) {
+export function Leaderboard({ initial, total, nowIso }: { initial: DisplayListing[]; total: number; nowIso: string }) {
   // const { chooseBid } = useBid(); // Restore with row bid controls below.
   const [loaded, setLoaded] = useState<DisplayListing[]>([]);
   const [loading, setLoading] = useState(false);
@@ -19,6 +20,21 @@ export function Leaderboard({ initial, total }: { initial: DisplayListing[]; tot
   const items = [...initial, ...loaded.filter((item) => !refreshedIds.has(item.id))]
     .map((item, index) => ({ ...item, rank: index + 1 }));
   const layoutKey = items.map((item) => `${item.id}:${item.rank}`).join("|");
+  // "Paid n ago" runs on the server clock so the first paint hydrates cleanly and a
+  // visitor with a skewed system clock still sees the same ages everyone else does.
+  const serverNowMs = new Date(nowIso).getTime();
+  const [nowMs, setNowMs] = useState(serverNowMs);
+  const skewRef = useRef<number | null>(null);
+  const elapsed = items.map((item) => Math.max(0, nowMs - new Date(item.bidPlacedAt).getTime()));
+  const nextRefresh = elapsed.length ? Math.max(1_000, Math.min(...elapsed.map(relativeTimeRefreshMs))) : null;
+
+  useEffect(() => {
+    if (nextRefresh === null) return;
+    skewRef.current ??= Date.now() - serverNowMs;
+    const skew = skewRef.current;
+    const timer = window.setTimeout(() => setNowMs(Date.now() - skew), nextRefresh);
+    return () => window.clearTimeout(timer);
+  }, [nextRefresh, nowMs, serverNowMs]);
 
   useLayoutEffect(() => {
     const nextRects = new Map<string, DOMRect>();
@@ -90,8 +106,8 @@ export function Leaderboard({ initial, total }: { initial: DisplayListing[]; tot
     setLoading(true);
     try {
       const response = await fetch(`/api/leaderboard?offset=${items.length}&limit=20`);
-      const json = await response.json() as { items: Array<{ id: string; url: string; product_name: string; pitch: string | null; icon_url: string | null; bid_cents: number; verified_clicks: number; rank: number }> };
-      setLoaded((current) => [...current, ...json.items.map((item) => ({ id: item.id, url: item.url, productName: item.product_name, pitch: item.pitch, iconUrl: item.icon_url, bidCents: item.bid_cents, verifiedClicks: item.verified_clicks, rank: item.rank }))]);
+      const json = await response.json() as { items: Array<{ id: string; url: string; product_name: string; pitch: string | null; icon_url: string | null; bid_cents: number; verified_clicks: number; bid_placed_at: string; rank: number }> };
+      setLoaded((current) => [...current, ...json.items.map((item) => ({ id: item.id, url: item.url, productName: item.product_name, pitch: item.pitch, iconUrl: item.icon_url, bidCents: item.bid_cents, verifiedClicks: item.verified_clicks, bidPlacedAt: item.bid_placed_at, rank: item.rank }))]);
     } finally { setLoading(false); }
   }
 
@@ -99,7 +115,8 @@ export function Leaderboard({ initial, total }: { initial: DisplayListing[]; tot
     <section id="leaderboard" className="leaderboard-section">
       <div className="leaderboard-heading"><h2>Permanent leaderboard</h2><p>Every buyer stays. Ranked by total paid.</p></div>
       {items.length ? <div className="leaderboard-wrap"><ol className="leaderboard-list">
-        {items.map((item) => {
+        {items.map((item, index) => {
+          const paidAgo = formatRelativeTime(elapsed[index]);
           const active = takeover.listingId === item.id && takeover.animate;
           const motionClass = active && takeover.kind === "takeover"
             ? " is-takeover-row"
@@ -124,10 +141,10 @@ export function Leaderboard({ initial, total }: { initial: DisplayListing[]; tot
             <span className="row-copy">
               <h3>
                 <span className="row-title">{item.productName}</span>
-                <span className="row-title-clicks"><span aria-hidden="true">·</span> {item.verifiedClicks.toLocaleString()} clicks</span>
+                <span className="row-title-clicks"><span aria-hidden="true">·</span> {item.verifiedClicks.toLocaleString()} clicks <span aria-hidden="true">·</span> {paidAgo}</span>
               </h3>
               {item.pitch ? <span className="row-description">{item.pitch}</span> : null}
-              <span className="row-mobile-clicks">{item.verifiedClicks.toLocaleString()} clicks</span>
+              <span className="row-mobile-clicks">{item.verifiedClicks.toLocaleString()} clicks<span className="row-mobile-paid-ago">{paidAgo}</span></span>
             </span>
             <strong className="row-paid">${item.bidCents / 100}</strong>
           </a>
