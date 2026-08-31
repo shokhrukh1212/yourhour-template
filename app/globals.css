@@ -303,7 +303,7 @@ button,input { font:inherit; }
 .leaderboard-heading h2,.sponsors-heading h2 { margin:0; font-family:var(--font-display); font-size:30px; font-weight:700; line-height:1.15; letter-spacing:-.045em; }
 .leaderboard-heading p,.sponsors-heading p { margin:5px 0 0; color:var(--muted); font-size:15px; line-height:1.35; }
 .leaderboard-wrap { padding-top:0; }
-.leaderboard-list { display:grid; grid-template-columns:minmax(0,1fr); gap:3px; border:0; border-radius:0; background:transparent; overflow:visible; }
+.leaderboard-list { display:grid; grid-template-columns:minmax(0,1fr); gap:10px; border:0; border-radius:0; background:transparent; overflow:visible; }
 .leader-row,.leader-row:last-child { display:block; min-height:104px; padding:0; border:1px solid var(--line); border-radius:12px; background:rgba(255,255,255,.45); }
 .leader-row.winner { margin:0; border:1px solid rgba(255,76,63,.72); background:linear-gradient(90deg,rgba(255,76,63,.045),rgba(255,255,255,.2)); }
 .leaderboard-row-link { display:grid; grid-template-columns:46px 64px minmax(0,1fr) minmax(70px,88px); align-items:center; gap:16px; min-height:104px; padding:16px 22px; border-radius:inherit; outline:none; transition:background-color .14s ease,box-shadow .14s ease; }
