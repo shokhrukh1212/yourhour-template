@@ -12,6 +12,7 @@ import { SponsoredProducts, SponsorshipStatus } from "@/components/SponsoredProd
 import { getAllBidCents, getLeaderboard, getLeaderboardSummary, getTopListing } from "@/lib/leaderboard";
 import { nextBidCents } from "@/lib/pricing";
 import { getVisitorTotal } from "@/lib/visitors";
+import { getWatchingNow } from "@/lib/watching";
 import { getSponsorSlots } from "@/lib/sponsorship";
 
 export const dynamic = "force-dynamic";
@@ -22,12 +23,13 @@ function display(item: Awaited<ReturnType<typeof getTopListing>> & {}): DisplayL
 
 export default async function Home({ searchParams }: { searchParams: Promise<{ purchase?: string; sponsorship?: string; target?: string }> }) {
   const params = await searchParams;
-  const [top, rows, summary, existingBids, visitorTotal, sponsorSlots] = await Promise.all([
+  const [top, rows, summary, existingBids, visitorTotal, watchingNow, sponsorSlots] = await Promise.all([
     getTopListing(),
     getLeaderboard(5),
     getLeaderboardSummary(),
     getAllBidCents(),
     getVisitorTotal(),
+    getWatchingNow(),
     getSponsorSlots(),
   ]);
   const minimum = nextBidCents(top?.bid_cents ?? null);
@@ -39,7 +41,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ p
   const sponsorNow = new Date().toISOString();
   return (
     <main className="site-page">
-      <SiteHeader initialVisitors={visitorTotal} />
+      <SiteHeader initialVisitors={visitorTotal} initialWatching={watchingNow} />
       <BidProvider
         initialBidCents={initialBid}
         initialMinimumBidCents={minimum}

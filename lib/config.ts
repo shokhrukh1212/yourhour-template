@@ -27,6 +27,9 @@ export const config = {
 
   vemetric: {
     token: process.env.VEMETRIC_TOKEN ?? "",
+    // Private REST API key (vem_...), created under Project settings -> API.
+    // Distinct from the tracking token above; server-only, never NEXT_PUBLIC_.
+    apiKey: process.env.VEMETRIC_API_KEY ?? "",
     // Retained for the analytics integration; it is no longer linked in the header.
     publicDashboardUrl:
       process.env.VEMETRIC_PUBLIC_DASHBOARD_URL ??

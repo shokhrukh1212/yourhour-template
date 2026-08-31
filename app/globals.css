@@ -13,7 +13,12 @@ button,input { font:inherit; }
 .site-header-inner { display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:32px; }
 .brand { display:inline-flex; align-items:center; gap:12px; font-size:27px; font-weight:720; letter-spacing:-.035em; }
 .brand-mark { width:43px; height:43px; }
-.visitor-total { justify-self:center; margin:0; color:var(--muted); font-size:14px; white-space:nowrap; }.visitor-total strong { color:var(--navy); font-weight:680; font-variant-numeric:tabular-nums; }
+.header-stats { justify-self:center; display:flex; align-items:baseline; gap:18px; min-width:0; }
+.visitor-total { margin:0; color:var(--muted); font-size:14px; white-space:nowrap; }.visitor-total strong { color:var(--navy); font-weight:680; font-variant-numeric:tabular-nums; }
+.watching-now { margin:0; color:var(--muted); font-size:14px; white-space:nowrap; }.watching-now strong { color:var(--navy); font-weight:680; font-variant-numeric:tabular-nums; }
+.live-dot { display:inline-block; position:relative; top:-1px; width:7px; height:7px; margin-right:6px; border-radius:50%; background:var(--green); vertical-align:middle; animation:live-pulse 2.2s ease-out infinite; }
+@keyframes live-pulse { 0% { box-shadow:0 0 0 0 rgba(33,132,82,.5); } 70% { box-shadow:0 0 0 6px rgba(33,132,82,0); } 100% { box-shadow:0 0 0 0 rgba(33,132,82,0); } }
+@media (prefers-reduced-motion:reduce) { .live-dot { animation:none; } }
 .desktop-nav { display:flex; align-items:center; gap:28px; margin-left:auto; font-size:16px; font-weight:560; }.desktop-nav a:hover { color:var(--coral); }.nav-cta { display:inline-flex; align-items:center; height:34px; padding:0 14px; border:1px solid var(--line); border-radius:8px; color:var(--muted); font-size:14px; font-weight:560; white-space:nowrap; transition:border-color .15s ease,color .15s ease; }.nav-cta:hover { border-color:var(--navy); color:var(--navy)!important; }
 .menu-button,.mobile-nav { display:none; }
 .page-content { padding:0 0 50px; }
@@ -112,8 +117,12 @@ button,input { font:inherit; }
   .site-header-inner { grid-template-columns:auto 1fr auto; align-items:center; gap:10px; }
   .brand { display:flex; align-items:center; gap:8px; font-size:19px; }
   .brand-mark { width:30px; height:30px; }
+  .header-stats { align-items:flex-start; gap:11px; }
   .visitor-total { font-size:11px; }
   .visitor-total strong { display:block; font-size:13px; line-height:1.05; text-align:center; }
+  .watching-now { font-size:11px; text-align:center; }
+  .watching-now strong { display:block; font-size:13px; line-height:1.05; }
+  .live-dot { width:6px; height:6px; margin-right:4px; }
   .menu-button { grid-row:auto; width:40px; height:40px; padding:6px 4px; }
   .menu-button span { height:3px; }
   .mobile-nav { top:70px; }
