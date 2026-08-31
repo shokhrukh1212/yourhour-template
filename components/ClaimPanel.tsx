@@ -129,9 +129,8 @@ export function ClaimPanel({ empty = false }: { empty?: boolean }) {
   const errorId = "product-url-error";
   return (
     <form id="claim" className={`claim-panel ${empty ? "empty-claim" : ""}${takeoverComplete ? " has-takeover-success" : ""}`} onSubmit={submit} noValidate>
-      {!empty ? <><h2>Take the homepage</h2><p className="claim-intro">Pay $1 more to take the homepage.</p></> : null}
-      <label htmlFor="product-url">Product URL</label>
-      <input id="product-url" type="text" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="url" placeholder="name.com or https://name.com" value={url} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} onChange={(event) => { setUrl(event.target.value); setPreview(null); setError(null); }} />
+      {!empty ? <h2>Take the homepage</h2> : null}
+      <input id="product-url" aria-label="Product URL" type="text" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="url" placeholder="name.com or https://name.com" value={url} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} onChange={(event) => { setUrl(event.target.value); setPreview(null); setError(null); }} />
       <div className="bid-row">
         <button type="button" className="stepper-btn" aria-label={atMinimum ? `Minimum bid reached at $${effectiveMinimum / 100}; amount cannot be decreased` : "Decrease amount by one dollar"} disabled={atMinimum} onClick={() => step(-100)}>−</button>
         <div ref={amountRef} className="bid-amount"><span aria-hidden="true">$</span><input aria-label="Amount in dollars" type="text" inputMode="numeric" pattern="[0-9]*" value={bidInput} style={{ width: `${Math.max(1, bidInput.length)}ch` }} onChange={onAmountChange} onBlur={onAmountBlur} /></div>

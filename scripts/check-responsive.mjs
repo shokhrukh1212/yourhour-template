@@ -86,7 +86,8 @@ for (const [width, height] of sizes) {
         logoUrl: null,
       }),
     }));
-    const trigger = page.locator(width <= 768 ? ".mobile-promote-card" : ".sponsor-card-available").first();
+    // An open desktop slot is one button wrapping the two faces it turns between.
+    const trigger = page.locator(width <= 768 ? ".mobile-promote-card" : ".sponsor-flip").first();
     await trigger.click();
     const dialog = page.locator(".sponsor-dialog");
     await assert.doesNotReject(() => dialog.waitFor({ state: "visible" }));

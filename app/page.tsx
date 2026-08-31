@@ -54,10 +54,10 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ p
               <section className="homepage-grid top-grid">
                 <MetaViewContent valueCents={minimum} />
                 <div className="homepage-featured"><FeaturedProduct listing={display(top)} /></div>
-                <aside className="homepage-rail" aria-label="Homepage promotion options">
-                  <ClaimPanel />
+                <div className="homepage-claim"><ClaimPanel /></div>
+                <div className="homepage-sponsors">
                   <SponsoredProducts slots={sponsorSlots} nowIso={sponsorNow} suppressMobileDock={Boolean(purchaseIntent || sponsorshipIntent)} />
-                </aside>
+                </div>
                 <div className="homepage-leaderboard"><Leaderboard initial={rows.map(display)} total={summary.count} /></div>
                 <OvertakeTrail />
               </section>

@@ -27,7 +27,7 @@ button,input { font:inherit; }
 .visit-link { position:relative; overflow:hidden; }.visit-link::after { content:""; position:absolute; top:0; left:-60%; width:40%; height:100%; background:linear-gradient(115deg,transparent,rgba(9,35,62,.16),transparent); transform:skewX(-15deg); animation:visit-shimmer 3.2s ease-in-out infinite; pointer-events:none; }.visit-link:hover::after { background:linear-gradient(115deg,transparent,rgba(255,255,255,.5),transparent); }
 @keyframes visit-shimmer { 0% { left:-60%; } 45% { left:130%; } 100% { left:130%; } }
 .mobile-take-inline { display:none; }
-.claim-panel { padding:32px 40px 30px; scroll-margin-top:20px; }.claim-panel h2 { margin:0; font-size:34px; line-height:1.1; letter-spacing:-.035em; }.claim-intro { margin:12px 0 24px; color:var(--muted); font-size:16px; line-height:1.45; }.claim-panel label { display:block; margin:0 0 7px; font-size:14px; font-weight:620; }.claim-panel>input { width:100%; height:57px; border:1px solid rgba(9,35,62,.25); border-radius:10px; background:rgba(255,255,255,.68); color:var(--navy); padding:0 17px; font-size:16px; outline:none; }.claim-panel input:focus { border-color:var(--navy); box-shadow:0 0 0 3px rgba(9,35,62,.08); }.claim-panel input::placeholder { color:#8b9198; }
+.claim-panel { padding:32px 40px 30px; scroll-margin-top:20px; }.claim-panel h2 { margin:0 0 22px; font-size:34px; line-height:1.1; letter-spacing:-.035em; }.claim-intro { margin:12px 0 24px; color:var(--muted); font-size:16px; line-height:1.45; }.claim-panel label { display:block; margin:0 0 7px; font-size:14px; font-weight:620; }.claim-panel>input { width:100%; height:57px; border:1px solid rgba(9,35,62,.25); border-radius:10px; background:rgba(255,255,255,.68); color:var(--navy); padding:0 17px; font-size:16px; outline:none; }.claim-panel input:focus { border-color:var(--navy); box-shadow:0 0 0 3px rgba(9,35,62,.08); }.claim-panel input::placeholder { color:#8b9198; }
 .bid-row { display:flex; align-items:center; justify-content:center; gap:20px; margin-top:27px; }
 .stepper-btn { flex:0 0 auto; width:57px; height:53px; border:1px solid var(--navy); border-radius:10px; background:white; color:var(--navy); font-size:31px; line-height:1; cursor:pointer; }.stepper-btn:disabled { background:#ededed; border-color:#d4d4d4; color:#aaa; cursor:not-allowed; }
 .bid-amount { display:inline-flex; align-items:baseline; gap:0; color:var(--coral); white-space:nowrap; }.bid-amount span { font-size:43px; font-weight:690; letter-spacing:-.045em; }.bid-amount input { min-width:1ch; max-width:7ch; padding:0; border:0; background:transparent; color:inherit; font-size:43px; font-weight:690; letter-spacing:-.045em; font-variant-numeric:tabular-nums; text-align:left; outline:none; -moz-appearance:textfield; }.bid-amount input::-webkit-outer-spin-button,.bid-amount input::-webkit-inner-spin-button { -webkit-appearance:none; margin:0; }
@@ -84,6 +84,9 @@ button,input { font:inherit; }
 
 /* Narrower desktop widths: shrink the actions column and drop descriptions before overflow. */
 @media (min-width:1001px) and (max-width:1300px) {
+  /* The stepper row is what sets the panel's minimum width; at these widths its
+     padding is what pushes the panel past the 320px rail column. */
+  .claim-panel { padding-inline:28px; }
   .leader-row { grid-template-columns:56px minmax(280px,1fr) 100px 130px 250px; }
   .row-copy p { display:none; }
   .row-actions { gap:12px; }
@@ -136,7 +139,7 @@ button,input { font:inherit; }
   .mobile-take-inline { display:flex; align-items:center; justify-content:center; flex:1 1 57%; min-width:0; height:48px; border:0; border-radius:8px; color:#fff; background:linear-gradient(100deg,#ff3c32,#ff5545); font-size:14px; font-weight:650; }
 
   .claim-panel { padding:18px 18px 16px; border-radius:14px; }
-  .claim-panel h2 { font-size:22px; }
+  .claim-panel h2 { margin-bottom:14px; font-size:22px; }
   .claim-intro { margin:6px 0 16px; font-size:13px; line-height:1.35; }
   .claim-panel label { font-size:12px; margin-bottom:5px; }
   .claim-panel>input { height:48px; font-size:15px; padding:0 14px; scroll-margin-block:22vh; }
@@ -288,17 +291,20 @@ button,input { font:inherit; }
 
 /* Simplified leaderboard and self-serve sponsorship MVP. */
 .site-shell { max-width:1440px; }
-.homepage-grid { display:grid; grid-template-columns:minmax(0,2fr) minmax(320px,1fr); grid-template-areas:"featured rail" "leaderboard rail"; align-items:start; gap:0 28px; }
+.homepage-grid { display:grid; grid-template-columns:minmax(0,2fr) minmax(320px,1fr); grid-template-areas:"featured claim" "leaderboard sponsors"; align-items:stretch; gap:0 28px; }
 .homepage-featured { grid-area:featured; min-width:0; }
 .homepage-featured .featured-card { min-height:100%; }
-.homepage-rail { grid-area:rail; display:grid; gap:24px; min-width:0; }
+.homepage-claim { grid-area:claim; display:grid; min-width:0; }
+.homepage-sponsors { grid-area:sponsors; display:grid; align-content:start; min-width:0; }
+.homepage-sponsors .sponsors-section { padding-top:28px; }
 .homepage-leaderboard { grid-area:leaderboard; min-width:0; }
 .homepage-leaderboard .leaderboard-section { padding-top:28px; }
-.leaderboard-heading { margin-left:0; }
+.leaderboard-heading,.sponsors-heading { margin:0 0 18px; }
+.leaderboard-heading h2,.sponsors-heading h2 { margin:0; font-family:var(--font-display); font-size:30px; font-weight:700; line-height:1.15; letter-spacing:-.045em; }
+.leaderboard-heading p,.sponsors-heading p { margin:5px 0 0; color:var(--muted); font-size:15px; line-height:1.35; }
 .leaderboard-wrap { padding-top:0; }
-.leaderboard-list { overflow:hidden; }
-.leader-row,.leader-row:last-child { display:block; min-height:104px; padding:0; border:0; border-bottom:1px solid rgba(9,35,62,.12); }
-.leader-row:last-child { border-bottom:0; }
+.leaderboard-list { display:grid; grid-template-columns:minmax(0,1fr); gap:3px; border:0; border-radius:0; background:transparent; overflow:visible; }
+.leader-row,.leader-row:last-child { display:block; min-height:104px; padding:0; border:1px solid var(--line); border-radius:12px; background:rgba(255,255,255,.45); }
 .leader-row.winner { margin:0; border:1px solid rgba(255,76,63,.72); background:linear-gradient(90deg,rgba(255,76,63,.045),rgba(255,255,255,.2)); }
 .leaderboard-row-link { display:grid; grid-template-columns:46px 64px minmax(0,1fr) minmax(70px,88px); align-items:center; gap:16px; min-height:104px; padding:16px 22px; border-radius:inherit; outline:none; transition:background-color .14s ease,box-shadow .14s ease; }
 .leaderboard-row-link:hover { background:rgba(9,35,62,.035); }
@@ -314,9 +320,6 @@ button,input { font:inherit; }
 .leaderboard-row-link .row-paid { justify-self:end; margin:0; padding:0; color:var(--navy); font-size:20px; font-weight:760; white-space:nowrap; }
 
 .sponsors-section { min-width:0; }
-.sponsors-heading { margin:0 0 12px 4px; }
-.sponsors-heading h2 { margin:0; font-family:var(--font-display); font-size:27px; line-height:1.15; letter-spacing:-.03em; }
-.sponsors-heading p { margin:5px 0 0; color:var(--muted); font-size:13px; line-height:1.35; }
 .desktop-sponsor-list { display:grid; gap:10px; }
 .sponsor-card { width:100%; min-width:0; min-height:105px; display:flex; align-items:center; gap:13px; padding:14px; border:1px solid var(--line); border-radius:13px; background:rgba(255,255,255,.52); color:var(--navy); text-align:left; overflow:hidden; outline:none; transition:border-color .14s ease,background-color .14s ease,box-shadow .14s ease; }
 .sponsor-card:hover { border-color:rgba(9,35,62,.35); background:rgba(255,255,255,.78); }
@@ -331,6 +334,17 @@ button,input { font:inherit; }
 .sponsor-description { display:-webkit-box; width:100%; margin-top:3px; overflow:hidden; color:var(--muted); font-size:11px; line-height:1.3; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
 .sponsor-meta { display:block; width:100%; margin-top:5px; overflow:hidden; color:var(--muted); text-overflow:ellipsis; white-space:nowrap; font-size:10px; }
 .sponsor-plus { display:grid; flex:0 0 42px; width:42px; height:42px; place-items:center; border:1px dashed rgba(9,35,62,.35); border-radius:50%; color:var(--coral); font-size:26px; font-weight:350; }
+.sponsor-flip { display:block; width:100%; min-width:0; padding:0; border:0; background:transparent; color:inherit; font:inherit; text-align:left; cursor:pointer; perspective:900px; }
+.sponsor-flip:disabled { cursor:not-allowed; }
+.sponsor-flip-inner { position:relative; display:block; transform-style:preserve-3d; transition:transform .8s cubic-bezier(.52,.02,.2,1); }
+.sponsor-flip.is-still .sponsor-flip-inner { transition:none; }
+.sponsor-flip-face { backface-visibility:hidden; -webkit-backface-visibility:hidden; }
+.sponsor-flip-face.is-back { position:absolute; inset:0; transform:rotateX(180deg); }
+.sponsor-flip:disabled .sponsor-flip-face { opacity:.62; }
+.sponsor-flip:focus-visible { outline:none; }
+.sponsor-flip:focus-visible .sponsor-flip-face { border-color:var(--navy); box-shadow:0 0 0 3px rgba(9,35,62,.18); }
+.sponsor-offer { display:block; width:100%; margin-top:2px; font-size:14px; line-height:1.35; }
+.sponsor-term { margin-left:5px; color:var(--muted); font-size:12px; font-weight:620; }
 .sponsors-sold-out { margin:2px 4px 0; color:var(--muted); font-size:12px; line-height:1.4; }
 .mobile-promote-card { display:none; }
 
@@ -369,14 +383,14 @@ button,input { font:inherit; }
 .mobile-sponsor-dock { display:none; }
 
 @media (max-width:900px) {
-  .homepage-grid { display:grid; grid-template-columns:minmax(0,1fr); grid-template-areas:"featured" "rail" "leaderboard"; gap:14px; }
-  .homepage-rail { gap:14px; }
+  .homepage-grid { display:grid; grid-template-columns:minmax(0,1fr); grid-template-areas:"featured" "claim" "sponsors" "leaderboard"; gap:14px; }
+  .homepage-sponsors .sponsors-section { padding-top:0; }
   .homepage-leaderboard .leaderboard-section { padding-top:15px; }
 }
 
 @media (max-width:768px) {
   .page-content { padding-bottom:calc(15svh + 20px + env(safe-area-inset-bottom,0px)); }
-  .homepage-grid,.homepage-rail { gap:12px; }
+  .homepage-grid { gap:12px; }
   .homepage-leaderboard .leaderboard-section { padding-top:14px; }
   .leaderboard-heading { margin:0 0 13px; }
   .leaderboard-heading h2 { font-size:25px; }
@@ -430,5 +444,5 @@ button,input { font:inherit; }
 }
 
 @media (prefers-reduced-motion:reduce) {
-  .leaderboard-row-link,.sponsor-card,.mobile-sponsor-dock { transition:none; }
+  .leaderboard-row-link,.sponsor-card,.sponsor-flip-inner,.mobile-sponsor-dock { transition:none; }
 }

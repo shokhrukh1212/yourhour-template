@@ -61,18 +61,89 @@ function ActiveSponsorCard({ campaign, nowIso }: { campaign: SponsorCampaign; no
   );
 }
 
+/** One face of an open sponsorship slot: the same offer priced for one duration. */
+function SponsorOfferFace({ slot, duration, back = false, alt = null }: {
+  slot: SponsorSlot;
+  duration: SponsorDuration;
+  back?: boolean;
+  alt?: SponsorDuration | null;
+}) {
+  return (
+    <span className={`sponsor-card sponsor-card-available sponsor-flip-face${back ? " is-back" : ""}`} aria-hidden="true">
+      <span className="sponsor-plus">+</span>
+      <span className="sponsor-card-copy">
+        <strong>{slot.reservedUntil ? "Checkout in progress" : "Sponsor this spot"}</strong>
+        <span className="sponsor-offer">
+          Position {slot.position} · {money(slot.prices[duration], slot.currency)}
+          <span className="sponsor-term">/ {duration} days</span>
+          {alt ? <span className="sponsor-term">or {money(slot.prices[alt], slot.currency)} / {alt} days</span> : null}
+        </span>
+        <span className="sponsor-description">{SPONSOR_POSITION_CONFIG[slot.position].visibility}</span>
+      </span>
+    </span>
+  );
+}
+
+/**
+ * An open slot sells two durations, so the card turns on its horizontal axis to
+ * show both instead of hiding the 30-day price behind the checkout dialog. The
+ * turn count comes from the list so every card keeps one rhythm; `null` means the
+ * viewer asked for reduced motion and both prices are printed on one still card.
+ */
+function AvailableSponsorCard({
+  slot,
+  turns,
+  delayMs,
+  onSelect,
+}: {
+  slot: SponsorSlot;
+  turns: number | null;
+  delayMs: number;
+  onSelect: (duration: SponsorDuration) => void;
+}) {
+  const unavailable = slot.prices[7] === null || Boolean(slot.reservedUntil);
+  const canFlip = !unavailable && slot.prices[30] !== null;
+  const showing: SponsorDuration = canFlip && turns !== null && turns % 2 === 1 ? 30 : 7;
+  const still = turns === null || !canFlip;
+  const offers = canFlip
+    ? `${money(slot.prices[7], slot.currency)} for 7 days or ${money(slot.prices[30], slot.currency)} for 30 days`
+    : `${money(slot.prices[7], slot.currency)} for 7 days`;
+
+  return (
+    <button
+      type="button"
+      className={`sponsor-flip${still ? " is-still" : ""}`}
+      disabled={unavailable}
+      aria-label={slot.reservedUntil
+        ? `Position ${slot.position} — checkout in progress`
+        : `Sponsor position ${slot.position} — ${offers}`}
+      onClick={() => onSelect(showing)}
+    >
+      <span
+        className="sponsor-flip-inner"
+        style={{ transform: `rotateX(${still ? 0 : (turns ?? 0) * 180}deg)`, transitionDelay: `${delayMs}ms` }}
+      >
+        <SponsorOfferFace slot={slot} duration={7} alt={still && canFlip ? 30 : null} />
+        {still ? null : <SponsorOfferFace slot={slot} duration={30} back />}
+      </span>
+    </button>
+  );
+}
+
 function SponsorModal({
   slots,
   selectedPosition,
+  selectedDuration,
   onClose,
 }: {
   slots: SponsorSlot[];
   selectedPosition: SponsorPosition | null;
+  selectedDuration: SponsorDuration;
   onClose: () => void;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [position, setPosition] = useState<SponsorPosition>(selectedPosition ?? 1);
-  const [duration, setDuration] = useState<SponsorDuration>(7);
+  const [duration, setDuration] = useState<SponsorDuration>(selectedDuration);
   const [url, setUrl] = useState("");
   const [productName, setProductName] = useState("");
   const [description, setDescription] = useState("");
@@ -349,39 +420,56 @@ export function SponsoredProducts({
   nowIso: string;
   suppressMobileDock?: boolean;
 }) {
-  const [modalPosition, setModalPosition] = useState<SponsorPosition | null>(null);
+  const [modal, setModal] = useState<{ position: SponsorPosition; duration: SponsorDuration } | null>(null);
+  // Off until the client has checked the motion preference, so the server and the
+  // first client render agree on the un-turned card.
+  const [flipping, setFlipping] = useState(false);
+  const [turns, setTurns] = useState(0);
+  const [paused, setPaused] = useState(false);
   const active = useMemo(() => slots.flatMap((slot) => slot.active ? [slot.active] : []), [slots]);
   const available = slots.filter((slot) => !slot.active && !slot.reservedUntil);
   const nearestEnd = active.length === 4
     ? [...active].sort((a, b) => a.endsAt.localeCompare(b.endsAt))[0]?.endsAt
     : null;
 
+  useEffect(() => {
+    const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const apply = () => setFlipping(!motion.matches);
+    apply();
+    motion.addEventListener("change", apply);
+    return () => motion.removeEventListener("change", apply);
+  }, []);
+
+  useEffect(() => {
+    if (!flipping || paused) return;
+    const timer = window.setInterval(() => setTurns((current) => current + 1), 5000);
+    return () => window.clearInterval(timer);
+  }, [flipping, paused]);
+
   return (
     <section className="sponsors-section" aria-labelledby="sponsors-title">
       <div className="sponsors-heading">
         <h2 id="sponsors-title">Sponsored products</h2>
-        <p>Temporary exposure, separate from leaderboard rank.</p>
+        <p>Temporary exposure, separate from rank.</p>
       </div>
-      <div className="desktop-sponsor-list">
-        {slots.map((slot) => slot.active ? (
+      <div
+        className="desktop-sponsor-list"
+        // Reading a price should not become a race against the next turn.
+        onPointerEnter={() => setPaused(true)}
+        onPointerLeave={() => setPaused(false)}
+        onFocusCapture={() => setPaused(true)}
+        onBlurCapture={() => setPaused(false)}
+      >
+        {slots.map((slot, index) => slot.active ? (
           <ActiveSponsorCard key={slot.position} campaign={slot.active} nowIso={nowIso} />
         ) : (
-          <button
+          <AvailableSponsorCard
             key={slot.position}
-            type="button"
-            className="sponsor-card sponsor-card-available"
-            disabled={slot.prices[7] === null || Boolean(slot.reservedUntil)}
-            onClick={() => {
-              setModalPosition(slot.position);
-            }}
-          >
-            <span className="sponsor-plus" aria-hidden="true">+</span>
-            <span className="sponsor-card-copy">
-              <strong>{slot.reservedUntil ? "Checkout in progress" : "Sponsor this spot"}</strong>
-              <span>Position {slot.position} · {money(slot.prices[7], slot.currency)} / 7 days</span>
-              <span className="sponsor-description">{SPONSOR_POSITION_CONFIG[slot.position].visibility}</span>
-            </span>
-          </button>
+            slot={slot}
+            turns={flipping ? turns : null}
+            delayMs={index * 90}
+            onSelect={(duration) => setModal({ position: slot.position, duration })}
+          />
         ))}
         {nearestEnd ? (
           <p className="sponsors-sold-out">All positions are occupied. The nearest is expected to reopen <time dateTime={nearestEnd}>{new Date(nearestEnd).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</time>.</p>
@@ -392,13 +480,13 @@ export function SponsoredProducts({
         type="button"
         className="mobile-promote-card"
         disabled={!available.length}
-        onClick={() => setModalPosition(available[0]?.position ?? null)}
+        onClick={() => setModal(available[0] ? { position: available[0].position, duration: 7 } : null)}
       >
         <span aria-hidden="true">+</span>
         <span><strong>{available.length ? "Promote your product" : "Sponsored positions sold out"}</strong><small>{available.length ? "Choose an available sponsored position" : nearestEnd ? `Nearest opening ${new Date(nearestEnd).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "Check back soon"}</small></span>
       </button>
 
-      {modalPosition ? <SponsorModal slots={slots} selectedPosition={modalPosition} onClose={() => setModalPosition(null)} /> : null}
+      {modal ? <SponsorModal slots={slots} selectedPosition={modal.position} selectedDuration={modal.duration} onClose={() => setModal(null)} /> : null}
       <MobileSponsorDock campaigns={active} suppress={suppressMobileDock} />
     </section>
   );
