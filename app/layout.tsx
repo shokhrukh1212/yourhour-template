@@ -4,6 +4,7 @@ import localFont from "next/font/local";
 import { Suspense } from "react";
 import { VemetricScript } from "@vemetric/react";
 import { MetaPixelRouteTracker } from "@/components/MetaPixelRouteTracker";
+import { VisitorPing } from "@/components/VisitorPing";
 import { config } from "@/lib/config";
 import "./globals.css";
 
@@ -73,6 +74,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
+        <VisitorPing />
         {vemetricToken ? <VemetricScript token={vemetricToken} /> : null}
         {config.metaPixel.id ? (
           <>

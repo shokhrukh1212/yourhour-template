@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Logo } from "./Logo";
+import { VISITOR_COUNT_EVENT, type VisitorCounts } from "./VisitorPing";
 
 const VISITOR_POLL_MS = 5_000;
 
@@ -22,22 +23,27 @@ export function SiteHeader({
     let inFlight = false;
     let controller: AbortController | null = null;
 
-    const read = async (register: boolean) => {
+    const apply = (data: VisitorCounts) => {
+      if (!active) return;
+      if (typeof data.visitors === "number") setVisitors(data.visitors);
+      // Vemetric being unreachable returns null; keep the last known count
+      // rather than flickering the indicator out of the header.
+      if (typeof data.watching === "number") setWatching(data.watching);
+    };
+
+    // Read-only on purpose: VisitorPing in the root layout is the single place that
+    // registers an arrival, so the header polling here can never mint a second id.
+    const read = async () => {
       if (inFlight) return;
       inFlight = true;
       controller = new AbortController();
       try {
-        const response = await fetch(register ? "/api/visitors" : "/api/visitors?peek=1", {
+        const response = await fetch("/api/visitors?peek=1", {
           cache: "no-store",
           signal: controller.signal,
         });
         if (!response.ok) return;
-        const data = await response.json() as { visitors?: number; watching?: number | null };
-        if (!active) return;
-        if (typeof data.visitors === "number") setVisitors(data.visitors);
-        // Vemetric being unreachable returns null; keep the last known count
-        // rather than flickering the indicator out of the header.
-        if (typeof data.watching === "number") setWatching(data.watching);
+        apply(await response.json() as VisitorCounts);
       } catch {
         // A transient network failure should not disturb the header; the next poll retries.
       } finally {
@@ -46,13 +52,16 @@ export function SiteHeader({
     };
 
     const refreshWhenVisible = () => {
-      if (document.visibilityState === "visible") void read(false);
+      if (document.visibilityState === "visible") void read();
     };
 
-    void read(true);
+    const onRegistered = (event: Event) => apply((event as CustomEvent<VisitorCounts>).detail);
+
+    void read();
     const timer = window.setInterval(() => {
       refreshWhenVisible();
     }, VISITOR_POLL_MS);
+    window.addEventListener(VISITOR_COUNT_EVENT, onRegistered);
     window.addEventListener("focus", refreshWhenVisible);
     document.addEventListener("visibilitychange", refreshWhenVisible);
 
@@ -60,6 +69,7 @@ export function SiteHeader({
       active = false;
       controller?.abort();
       window.clearInterval(timer);
+      window.removeEventListener(VISITOR_COUNT_EVENT, onRegistered);
       window.removeEventListener("focus", refreshWhenVisible);
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
