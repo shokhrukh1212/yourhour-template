@@ -16,14 +16,21 @@ export type Listing = {
   verified_clicks: number;
   bid_placed_at: Date;
   created_at: Date;
+  /** When money actually landed. See `paid_at` in COLUMNS. */
+  paid_at: Date;
   owner_token_hash: string | null;
 };
 
 export type PublicListing = Omit<Listing, "owner_token_hash"> & { rank: number };
 
+// `bid_placed_at` is the tie-break sort key, not a clock: the leaderboard migration
+// backfilled pre-migration rows with synthetic year-2000 stamps to freeze their old
+// order inside rounded price ties. Those rows were paid for at `created_at`; a later
+// re-bid moves `bid_placed_at` to now(). The greater of the two is the real payment.
 const COLUMNS = `
   id::text AS id, slug, url, normalized_domain, product_name, pitch, icon_url,
-  bid_cents, verified_clicks, bid_placed_at, created_at, owner_token_hash
+  bid_cents, verified_clicks, bid_placed_at, created_at,
+  GREATEST(bid_placed_at, created_at) AS paid_at, owner_token_hash
 `;
 const ORDER = `bid_cents DESC, bid_placed_at ASC, id ASC`;
 

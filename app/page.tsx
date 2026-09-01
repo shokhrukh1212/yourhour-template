@@ -18,7 +18,7 @@ import { getSponsorSlots } from "@/lib/sponsorship";
 export const dynamic = "force-dynamic";
 
 function display(item: Awaited<ReturnType<typeof getTopListing>> & {}): DisplayListing {
-  return { id: item.id, url: item.url, productName: item.product_name, pitch: item.pitch, iconUrl: item.icon_url, bidCents: item.bid_cents, verifiedClicks: item.verified_clicks, bidPlacedAt: new Date(item.bid_placed_at).toISOString(), rank: item.rank };
+  return { id: item.id, url: item.url, productName: item.product_name, pitch: item.pitch, iconUrl: item.icon_url, bidCents: item.bid_cents, verifiedClicks: item.verified_clicks, paidAt: new Date(item.paid_at).toISOString(), rank: item.rank };
 }
 
 export default async function Home({ searchParams }: { searchParams: Promise<{ purchase?: string; sponsorship?: string; target?: string }> }) {

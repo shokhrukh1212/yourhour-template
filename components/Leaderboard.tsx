@@ -25,7 +25,7 @@ export function Leaderboard({ initial, total, nowIso }: { initial: DisplayListin
   const serverNowMs = new Date(nowIso).getTime();
   const [nowMs, setNowMs] = useState(serverNowMs);
   const skewRef = useRef<number | null>(null);
-  const elapsed = items.map((item) => Math.max(0, nowMs - new Date(item.bidPlacedAt).getTime()));
+  const elapsed = items.map((item) => Math.max(0, nowMs - new Date(item.paidAt).getTime()));
   const nextRefresh = elapsed.length ? Math.max(1_000, Math.min(...elapsed.map(relativeTimeRefreshMs))) : null;
 
   useEffect(() => {
@@ -106,8 +106,8 @@ export function Leaderboard({ initial, total, nowIso }: { initial: DisplayListin
     setLoading(true);
     try {
       const response = await fetch(`/api/leaderboard?offset=${items.length}&limit=20`);
-      const json = await response.json() as { items: Array<{ id: string; url: string; product_name: string; pitch: string | null; icon_url: string | null; bid_cents: number; verified_clicks: number; bid_placed_at: string; rank: number }> };
-      setLoaded((current) => [...current, ...json.items.map((item) => ({ id: item.id, url: item.url, productName: item.product_name, pitch: item.pitch, iconUrl: item.icon_url, bidCents: item.bid_cents, verifiedClicks: item.verified_clicks, bidPlacedAt: item.bid_placed_at, rank: item.rank }))]);
+      const json = await response.json() as { items: Array<{ id: string; url: string; product_name: string; pitch: string | null; icon_url: string | null; bid_cents: number; verified_clicks: number; paid_at: string; rank: number }> };
+      setLoaded((current) => [...current, ...json.items.map((item) => ({ id: item.id, url: item.url, productName: item.product_name, pitch: item.pitch, iconUrl: item.icon_url, bidCents: item.bid_cents, verifiedClicks: item.verified_clicks, paidAt: item.paid_at, rank: item.rank }))]);
     } finally { setLoading(false); }
   }
 

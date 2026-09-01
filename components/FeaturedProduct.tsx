@@ -5,7 +5,7 @@ import { ProductLogo } from "./ProductLogo";
 import { TakeSpotButton } from "./TakeSpotButton";
 import { FEATURED_INTRO_KEY, useOvertake } from "./OvertakeProvider";
 
-export type DisplayListing = { id: string; url: string; productName: string; pitch: string | null; iconUrl: string | null; bidCents: number; verifiedClicks: number; bidPlacedAt: string; rank: number };
+export type DisplayListing = { id: string; url: string; productName: string; pitch: string | null; iconUrl: string | null; bidCents: number; verifiedClicks: number; paidAt: string; rank: number };
 
 let introPlayedThisDocument = false;
 
